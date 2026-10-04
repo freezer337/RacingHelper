@@ -41,7 +41,18 @@ static async Task ServeCmd(string dbPath, int port)
     var db = new Database(dbPath);
     var store = new SessionStore(db);
     var hub = new RacingHelper.Live.TelemetryHub(settings, store, new AnalysisService(store));
-    hub.Engineer.Said += m => Console.WriteLine($"  >> [{m.Category}] {m.Text}");
+    if (Environment.GetEnvironmentVariable("RH_CC_PORT") is { Length: > 0 } ccPort) settings.Current.CrewChiefPort = int.Parse(ccPort);
+    if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
+    hub.Engineer.Said += m =>
+    {
+        // same routing as the desktop app: CrewChief when connected, otherwise (here) just the console
+        if (!m.Speak) Console.WriteLine($"  >> [{m.Category}] {m.Text}");
+    };
+    hub.Radio.Released += m =>
+    {
+        bool cc = hub.CrewChief.TryHandle(m);
+        Console.WriteLine($"  >> [{m.Category}{(cc ? "/crewchief" : "/voice")}] {m.Text}");
+    };
     hub.Start();
     var watcher = new IbtWatcher(new IbtImporter(store), db, () => settings.Current);
     var web = new RacingHelper.Web.WebServer(hub, watcher, new HeadlessBridge());
@@ -54,9 +65,20 @@ static void HubCmd(string dbPath, string ibt, double speed)
 {
     var settings = new RacingHelper.SettingsStore(Path.Combine(Path.GetDirectoryName(dbPath)!, "settings.json"));
     settings.Current.AutoInstallSetups = false;
+    settings.Current.DataFolder = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
+    settings.Current.CrewChiefEnabled = false;
+    if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
+    if (Environment.GetEnvironmentVariable("RH_VERBOSITY") is { Length: > 0 } verb) settings.Current.VoiceVerbosity = verb;
+    if (Environment.GetEnvironmentVariable("RH_RUNLAPS") is { Length: > 0 } rl) settings.Current.SetupRunLaps = int.Parse(rl);
     var store = new SessionStore(new Database(dbPath));
     var hub = new RacingHelper.Live.TelemetryHub(settings, store, new AnalysisService(store));
-    hub.Engineer.Said += m => Console.WriteLine($"  >> [{m.Category}/{m.Priority}{(m.Speak ? "/voice" : "")}] {m.Text}");
+    hub.Engineer.Said += m => { if (!m.Speak) Console.WriteLine($"  >> [{m.Category}/{m.Priority}] {m.Text}"); };
+    hub.Radio.Released += m =>
+    {
+        var st = hub.State;
+        var (inZone, toZone) = RacingHelper.Live.RadioGate.Zone(st.LapDist, st.TrackLength, hub.Model, hub.Reference);
+        Console.WriteLine($"  >> [{m.Category}/{m.Priority}/voice] {m.Text}   (said at {st.LapDist:0} m, {(inZone ? "IN CORNER" : $"{toZone:0} m to next corner")}, waited {(DateTime.Now - m.At).TotalSeconds:0.0}s)");
+    };
     hub.Start();
     hub.StartReplay(ibt, speed);
     var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -71,6 +93,8 @@ static void HubCmd(string dbPath, string ibt, double speed)
             var c = s.LastCorner;
             Console.WriteLine($"     corner {c.Name} lap {c.Lap}: {c.TimeDelta:+0.000;-0.000}s vmin {c.MinSpeed:0} ({c.MinSpeedDiff:+0;-0}) {c.Verdict}");
         }
+        if (s.TyreLoad is { } tl && sw.ElapsedMilliseconds % 2000 < 200)
+            Console.WriteLine($"     tyres lap {s.Lap} {s.LapPct:P0}: {tl.State} warm={tl.WarmPct:P0} front={tl.FrontLoad:0.00} rear={tl.RearLoad:0.00} [{string.Join(" ", tl.Load.Select(x => x.ToString("0.00")))}]");
         if (sw.ElapsedMilliseconds % 4000 < 200)
             Console.WriteLine($"[{s.Status}] lap {s.Lap} {s.LapPct:P0} cur={Fmt.LapTime(s.CurrentLapTime)} delta={s.Delta:+0.000;-0.000} pred={Fmt.LapTime(s.PredictedLap)} ref='{s.ReferenceLabel}' brakeIn={s.NextBrakeDist:0}m {s.NextCorner} fuel={s.Fuel?.PerLapAvg:0.00}L/lap {s.Fuel?.LapsInTank:0.0} laps sectors=[{string.Join(" ", s.Sectors.Select(x => $"{x.State[0]}{x.Delta:+0.00;-0.00}{x.Color}"))}] tyres={string.Join(",", s.Tyres.Select(t => $"{t.Pressure:0}/{t.TempMid:0}"))} wx={s.Weather.TrackTemp:0}C {s.Weather.Wetness}");
         if (s.Status == "waiting" && sw.Elapsed.TotalSeconds > 3) break;

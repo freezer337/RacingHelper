@@ -63,6 +63,7 @@ public sealed class SessionInfo
     public float EstLapTime;
     public string SetupName = "";
     public bool SetupModified;
+    public bool IsFixedSetup;
     public List<string> TireCompounds = new();
 
     // sessions
@@ -101,6 +102,7 @@ public sealed class SessionInfo
         EventType = w.Str("EventType");
         Category = w.Str("Category");
         IncidentLimit = w.Int("WeekendOptions.IncidentLimit");
+        IsFixedSetup = w.Int("WeekendOptions.IsFixedSetup") == 1;
 
         var d = Root["DriverInfo"] ?? YNode.Empty;
         PlayerCarIdx = d.Int("DriverCarIdx");

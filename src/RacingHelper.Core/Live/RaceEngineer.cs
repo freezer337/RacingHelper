@@ -26,20 +26,23 @@ public sealed class RaceEngineer
     int Verbosity => _settings().VoiceVerbosity switch { "minimal" => 0, "detailed" => 2, _ => 1 };
 
     /// <param name="key">dedupe key; the same key is not repeated within <paramref name="cooldownSec"/>.</param>
-    public void Say(string text, string category = "info", int priority = 1, string? key = null, double cooldownSec = 0, bool speak = true, int minVerbosity = 0)
+    /// <returns>false when suppressed by the cooldown.</returns>
+    public bool Say(string text, string category = "info", int priority = 1, string? key = null, double cooldownSec = 0, bool speak = true, int minVerbosity = 0,
+                    float lapDist = float.NaN, float validUntil = float.NaN, bool immediate = false)
     {
         if (Verbosity < minVerbosity) speak = false;
         lock (_lock)
         {
             if (key != null)
             {
-                if (_lastByKey.TryGetValue(key, out var last) && (DateTime.Now - last).TotalSeconds < cooldownSec) return;
+                if (_lastByKey.TryGetValue(key, out var last) && (DateTime.Now - last).TotalSeconds < cooldownSec) return false;
                 _lastByKey[key] = DateTime.Now;
             }
-            var m = new EngineerMessage { Text = text, Category = category, Priority = priority, Speak = speak };
+            var m = new EngineerMessage { Text = text, Category = category, Priority = priority, Speak = speak, LapDist = lapDist, ValidUntil = validUntil, Immediate = immediate };
             _log.Add(m);
             if (_log.Count > 200) _log.RemoveRange(0, 50);
             Said?.Invoke(m);
+            return true;
         }
     }
 

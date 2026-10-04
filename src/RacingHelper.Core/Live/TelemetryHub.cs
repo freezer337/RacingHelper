@@ -19,6 +19,18 @@ public sealed class TelemetryHub : IDisposable
     public AnalysisService Analysis { get; }
     public RaceEngineer Engineer { get; }
     public SetupInstaller Setups { get; }
+    public TyreManager TyreManager { get; }
+    public DrivingCoach Coach { get; }
+    public CarManager CarManager { get; }
+    public SetupEngineer SetupEngineer { get; }
+    public Insights Insights { get; }
+    public InCarAdvisor InCarAdvisor { get; }
+    public PitAutoService Pit { get; }
+    public CarNotesStore Notes { get; }
+    public CrashAnalyzer Crash { get; }
+    public CrewChiefBridge CrewChief { get; }
+    /// <summary>Spoken messages come out here (after waiting for a straight); subscribe to this for voice output.</summary>
+    public RadioGate Radio { get; }
 
     volatile LiveState _state = new();
     public LiveState State => _state;
@@ -74,6 +86,16 @@ public sealed class TelemetryHub : IDisposable
     bool _refWet;
     double _historyFuelPerLap = double.NaN;
     float _lapFuelStart = float.NaN, _lapStartPct;
+    double _prevFrameTime = double.NaN;
+    int _lastPosition, _lastIncidents;
+    string _pitPlanText = "";
+    DateTime _pitPlanAt = DateTime.MinValue;
+    bool _notesAnnounced;
+    List<string> _sheetLines = new();
+    DateTime _sheetAt = DateTime.MinValue;
+    PitStopInfo? _lastStop;
+    LapComparison? _lastCmp;
+    readonly List<double> _recentLaps = new();
 
     // input history ring buffers (~30 Hz, 6 s)
     const int Hist = 180;
@@ -107,6 +129,22 @@ public sealed class TelemetryHub : IDisposable
         Analysis = analysis;
         Engineer = new RaceEngineer(() => Settings.Current);
         Setups = new SetupInstaller(() => Settings.Current);
+        TyreManager = new TyreManager(Engineer, () => Settings.Current);
+        Coach = new DrivingCoach(Engineer, () => Settings.Current);
+        CarManager = new CarManager(Engineer, () => Settings.Current);
+        SetupEngineer = new SetupEngineer(Engineer, () => Settings.Current);
+        Insights = new Insights(Engineer, () => Settings.Current);
+        InCarAdvisor = new InCarAdvisor(Engineer, () => Settings.Current);
+        Pit = new PitAutoService(Engineer, () => Settings.Current) { Commands = new IRacingPitCommands() };
+        Notes = new CarNotesStore(() => Settings.Current);
+        SetupEngineer.Notes = Notes;
+        Crash = new CrashAnalyzer(Engineer, () => Settings.Current) { DescribeFix = CrashFix };
+        Crash.Analysed += OnCrash;
+        CarManager.InBox += OnInBox;
+        CrewChief = new CrewChiefBridge(() => Settings.Current);
+        CrewChief.Log += m => Engineer.Info(m);
+        Radio = new RadioGate(() => Settings.Current);
+        Engineer.Said += m => { if (m.Speak) Radio.Enqueue(m); };
         _source = _live;
         Analysis.MyDriverIdProvider = () => Settings.Current.MyUserId;
 
@@ -120,6 +158,7 @@ public sealed class TelemetryHub : IDisposable
 
     public void Start()
     {
+        _ = CrewChief.StartAsync();
         _thread = new Thread(Loop) { IsBackground = true, Name = "telemetry", Priority = ThreadPriority.AboveNormal };
         _thread.Start();
         _worker = new Thread(() =>
@@ -166,6 +205,305 @@ public sealed class TelemetryHub : IDisposable
         return ok;
     }
 
+    // ------------------------------------------------------------------ questions from the driver (wheel buttons / hotkeys)
+
+    public static readonly (string id, string label)[] Questions =
+    {
+        ("tyres", "How are my tyres?"),
+        ("fuel", "Fuel: how much, how many laps, do I need to save?"),
+        ("gaps", "Gaps: car ahead / behind and who's catching who"),
+        ("pace", "My pace: last lap and where I lost time"),
+        ("potential", "Where's the time? (my best corners combined)"),
+        ("setup", "Setup session: where are we?"),
+        ("setup-toggle", "Start / stop a setup session"),
+        ("car", "What should I change in the car? (TC, ABS, brake bias…)"),
+        ("pit", "What will you set at my pit stop?"),
+        ("garage", "What's on my setup sheet? (preset + things to try)"),
+        ("crash", "Why did I crash?"),
+        ("repeat", "Repeat the last message"),
+        ("quiet", "Quiet mode on / off (only important calls)"),
+    };
+
+    /// <summary>Answers a driver question out loud straight away (no waiting for a straight) and returns the text.</summary>
+    public string Ask(string id)
+    {
+        string answer;
+        try { answer = Answer(id); }
+        catch (Exception e) { answer = "Sorry, I couldn't work that out. " + e.Message; }
+        if (id != "repeat" && answer.Length > 0) Engineer.Say(answer, "answer", 2, immediate: true);
+        return answer;
+    }
+
+    string Answer(string id)
+    {
+        var f = _source.Frame;
+        bool driving = _info != null;
+        switch (id)
+        {
+            case "tyres":
+                return TyreManager.Describe();
+            case "fuel":
+                return Insights.DescribeFuel(driving ? ComputeFuel(f) : null);
+            case "gaps":
+                return driving ? Insights.DescribeGaps(_standings, f.PlayerCarIdx, ComputeFuel(f)?.LapsRemaining ?? double.NaN) : "No session running.";
+            case "pace":
+            {
+                if (!double.IsFinite(_lastLap)) return "No lap times yet.";
+                var parts = new List<string> { $"Last lap {RaceEngineer.Speak(_lastLap)}" + (double.IsFinite(_lastLapDelta) ? $", {(_lastLapDelta >= 0 ? "plus" : "minus")} {Math.Abs(_lastLapDelta):0.00} to the reference." : ".") };
+                var top = _lastCmp?.TopLosses.FirstOrDefault();
+                if (top != null) parts.Add($"Most lost at {(top.Name.StartsWith('T') ? "turn " + top.Name[1..] : top.Name)}, {top.TimeDelta:0.00}{(string.IsNullOrEmpty(top.Verdict) ? "" : ", " + top.Verdict)}.");
+                if (_recentLaps.Count >= 3)
+                {
+                    double avg = _recentLaps.Average(), spread = _recentLaps.Max() - _recentLaps.Min();
+                    parts.Add($"Last {_recentLaps.Count} clean laps average {RaceEngineer.Speak(avg)}, spread {spread:0.0}.");
+                }
+                return string.Join(" ", parts);
+            }
+            case "potential":
+                return Insights.DescribePotential();
+            case "setup":
+                return SetupEngineer.Describe();
+            case "setup-toggle":
+                if (SetupEngineer.State is SetupEngineer.Phase.Off or SetupEngineer.Phase.Done) SetupEngineer.Start();
+                else SetupEngineer.Stop();
+                return "";
+            case "car":
+                return InCarAdvisor.Describe();
+            case "garage":
+                return SheetAnswer();
+            case "crash":
+                return Crash.Last == null ? "No crashes this session." : Crash.Last.Summary;
+            case "pit":
+                return driving ? Pit.Describe(f, ComputeFuel(f)) : "No session running.";
+            case "repeat":
+            {
+                var last = Radio.Last;
+                if (last == null) { Engineer.Say("Nothing to repeat yet.", "answer", 2, immediate: true); return ""; }
+                Engineer.Say(last.Text, "answer", 2, immediate: true);
+                return last.Text;
+            }
+            case "quiet":
+                Radio.Quiet = !Radio.Quiet;
+                return Radio.Quiet ? "Quiet mode on. Only important calls from now." : "Quiet mode off. Full radio.";
+            default:
+                return "";
+        }
+    }
+
+    /// <summary>Cold pressures your last run here suggests (Tyres page logic), for the automatic pit service.</summary>
+    void LoadPitPressures(SessionInfo si, long currentId)
+    {
+        Enqueue(() =>
+        {
+            try
+            {
+                foreach (var s in Store.Db.GetSessions(si.CarPath, si.TrackKey).Where(x => x.Id != currentId).OrderByDescending(x => x.StartedAt).Take(5))
+                {
+                    var laps = Store.Db.GetLaps(s.Id).Where(l => l.Tyres != null && !l.OutLap).ToList();
+                    if (laps.Count < 3) continue;
+                    var adv = TyreAnalyzer.Analyze(laps.Select(l => l.Tyres!).ToList(), Settings.Current.TyreTargetFor(si.CarPath, si.CarCategory));
+                    if (adv.Count != 4) continue;
+                    var kpa = adv.Select(a => float.IsFinite(a.SuggestedCold) ? a.SuggestedCold : a.PressCold).ToArray();
+                    if (kpa.Any(k => !float.IsFinite(k) || k < 50)) continue;
+                    Pit.SetHistoryPressures(kpa, $"your run here on {s.StartedAt:d MMM}");
+                    return;
+                }
+                Pit.SetHistoryPressures(null, "");
+            }
+            catch { Pit.SetHistoryPressures(null, ""); }
+        });
+    }
+
+    // ------------------------------------------------------------------ crashes, setup sheet, race debrief
+
+    /// <summary>How to fix a handling problem in this car, in-car adjustment first.</summary>
+    string CrashFix(SetupRequest req)
+    {
+        var si = _info;
+        if (si == null) return "";
+        var dc = _source.Frame.Dc;
+        if (req.Symptom == "oversteer" && req.Phase == "exit" && dc.ContainsKey("dcTractionControl")) return "increase TC by 1";
+        if (req.Symptom == "oversteer" && req.Phase == "entry" && dc.ContainsKey("dcBrakeBias")) return "move brake bias forward 0.5";
+        if (req.Symptom == "understeer" && req.Phase == "entry" && dc.ContainsKey("dcBrakeBias")) return "move brake bias back 0.5";
+        if (si.IsFixedSetup) return "";
+        req.Category = si.CarCategory;
+        var ch = SetupOptimiser.Advise(req, si.CarSetup).Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
+        return ch == null ? "" : $"{ch.Parameter}, {ch.Action.ToLowerInvariant()} in the garage";
+    }
+
+    static string KindWords(string kind) => kind switch
+    {
+        "power-oversteer" => "power oversteer", "brake-oversteer" => "the rear stepping out under braking",
+        "lift-oversteer" => "lift-off oversteer", "mid-oversteer" => "the rear letting go mid-corner",
+        "ran-wide" => "running wide", "kerb" => "kerb strikes", _ => kind,
+    };
+
+    void OnCrash(CrashRecord rec, SetupRequest? req)
+    {
+        var si = _info;
+        if (si == null) return;
+        Notes.Update(si.CarPath, si.TrackKey, n =>
+        {
+            n.Crashes.Add(rec);
+            if (req == null) return;
+            int same = n.Crashes.Count(c => c.SelfInflicted && c.Kind == rec.Kind && c.At > DateTime.Now.AddDays(-30));
+            if (same >= 2 && !n.Todo.Any(t => t.Symptom == req.Symptom && t.Phase == req.Phase))
+                n.Todo.Add(new SheetTodo { Symptom = req.Symptom, Phase = req.Phase, Speed = req.Speed, Reason = $"{same} crashes from {KindWords(rec.Kind)}" });
+        }, si);
+        _sheetAt = DateTime.MinValue;
+    }
+
+    /// <summary>Preset values that differ from the car right now, and things to try.</summary>
+    List<string> SheetLines()
+    {
+        if ((DateTime.Now - _sheetAt).TotalSeconds < 2) return _sheetLines;
+        _sheetAt = DateTime.Now;
+        var si = _info;
+        var lines = new List<string>();
+        if (si != null)
+        {
+            var n = Notes.Get(si.CarPath, si.TrackKey);
+            foreach (var (key, preset, now) in CarNotesStore.PresetDiff(n, si)) lines.Add($"Set {CarNotesStore.Label(key)} to {preset} (now {now})");
+            if (!si.IsFixedSetup)   // nothing to change in a fixed setup
+                foreach (var t in n.Todo) lines.Add($"Try: fix {t.Symptom} {(t.Phase == "all" ? "" : "on " + t.Phase)} ({t.Reason})");
+        }
+        _sheetLines = lines;
+        return lines;
+    }
+
+    string SheetAnswer()
+    {
+        var si = _info;
+        if (si == null) return "No session running.";
+        var n = Notes.Get(si.CarPath, si.TrackKey);
+        var diff = CarNotesStore.PresetDiff(n, si);
+        var parts = new List<string>();
+        if (diff.Count > 0) parts.Add("Your preset here differs from the car: " + string.Join(", ", diff.Take(4).Select(d => $"{CarNotesStore.Label(d.key)} should be {d.preset}, you're on {d.now}")) + ".");
+        else if (n.Preset.Count > 0) parts.Add($"The car matches your preset here, {n.Preset.Count} values.");
+        else parts.Add("No preset for this car here yet. Changes that prove better in a setup session go into it.");
+        if (n.Todo.Count > 0) parts.Add("To try: " + string.Join(", ", n.Todo.Select(t => t.Reason)) + ".");
+        return string.Join(" ", parts);
+    }
+
+    /// <summary>Stopped in the pit box: in practice, read out preset values that differ from the car.</summary>
+    void OnInBox(bool afterDriving)
+    {
+        var si = _info;
+        if (si == null || TyreManager.Kind(_tracker.Current?.SessionType ?? "") == "race") return;
+        var diff = CarNotesStore.PresetDiff(Notes.Get(si.CarPath, si.TrackKey), si);
+        if (diff.Count == 0) return;
+        Engineer.Say("Setup sheet: " + string.Join(", ", diff.Take(4).Select(d => $"{CarNotesStore.Label(d.key)} to {d.preset}, you're on {d.now}")) + ". Change it in the garage and save the setup.", "setup", 1);
+    }
+
+    /// <summary>First time in the car this session: what we learned last time (race result, things to try, preset).</summary>
+    void AnnounceNotes(SessionInfo si, string sessionType)
+    {
+        if (_notesAnnounced) return;
+        _notesAnnounced = true;
+        if (TyreManager.Kind(sessionType) == "race") return;
+        var n = Notes.Get(si.CarPath, si.TrackKey);
+        var parts = new List<string>();
+        if (n.LastRace != null && n.LastRace.At > DateTime.Now.AddDays(-21))
+            parts.Add($"Last race here you finished P{n.LastRace.Position}{(n.LastRace.Findings.Count > 0 ? ": " + n.LastRace.Findings[0] : "")}.");
+        var diff = CarNotesStore.PresetDiff(n, si);
+        if (diff.Count > 0) parts.Add($"Your setup sheet has {diff.Count} {(diff.Count == 1 ? "value" : "values")} different from this setup: " + string.Join(", ", diff.Take(3).Select(d => $"{CarNotesStore.Label(d.key)} {d.preset}")) + ".");
+        // where it went wrong recently: a driving focus for this session
+        var recent = n.Crashes.Where(c => c.SelfInflicted && c.At > DateTime.Now.AddDays(-21))
+                              .GroupBy(c => c.Kind).OrderByDescending(g => g.Count()).FirstOrDefault();
+        if (recent != null && recent.Count() >= 2)
+        {
+            var corners = recent.Select(c => c.Corner).Where(c => c.Length > 0).Distinct().Take(3).ToList();
+            string where = corners.Count == 0 ? "" : corners.Count == 1 ? $" at {corners[0]}" : $", at {string.Join(", ", corners.Take(corners.Count - 1))} and {corners[^1]}";
+            string focus = recent.Key switch
+            {
+                "power-oversteer" => "Easy with the throttle there until the steering unwinds.",
+                "brake-oversteer" => "Brake straighter and release gently there.",
+                "ran-wide" => "Don't rush the throttle there.",
+                "kerb" => "Stay off the kerbs there.",
+                _ => "Careful there.",
+            };
+            parts.Add($"Last time here: {recent.Count()} incidents from {KindWords(recent.Key)}{where}. {focus}");
+        }
+        bool setupWillHandle = TyreManager.Kind(sessionType) == "practice" && Settings.Current.LiveSetupAdvice;
+        if (n.Todo.Count > 0 && !setupWillHandle && !si.IsFixedSetup)
+            parts.Add("Setup things to try: " + string.Join(", ", n.Todo.Select(t => t.Reason)) + ".");
+        if (parts.Count > 0) Engineer.Say(string.Join(" ", parts), "setup", 1);
+    }
+
+    void RaceDebrief(SessionContext ctx)
+    {
+        var si = ctx.Info;
+        var crashes = Crash.Session.ToList();
+        var carWanted = InCarAdvisor.Unresolved.ToList();
+        int pos = _lastPosition, inc = _lastIncidents, hotF = TyreManager.HotFrontCount, hotR = TyreManager.HotRearCount;
+        var laps = ctx.Laps.Where(l => l.Valid && !l.OutLap && !l.InLap).ToList();
+        long id = ctx.DbId;
+        Enqueue(() =>
+        {
+            var rep = id > 0 ? Analysis.SessionReport(id) : null;
+            var findings = new List<string>();
+            var todo = new List<SheetTodo>();
+            var mine = crashes.Where(c => c.SelfInflicted).ToList();
+            foreach (var g in mine.GroupBy(c => c.Kind).OrderByDescending(g => g.Count()))
+            {
+                findings.Add($"{(g.Count() == 1 ? "one incident" : $"{g.Count()} incidents")} from {KindWords(g.Key)}{(g.First().Corner.Length > 0 ? $", {string.Join(" and ", g.Select(c => c.Corner).Distinct().Take(2))}" : "")}");
+                var req = g.Key switch
+                {
+                    "power-oversteer" => new SetupRequest { Symptom = "oversteer", Phase = "exit" },
+                    "brake-oversteer" => new SetupRequest { Symptom = "oversteer", Phase = "entry" },
+                    "lift-oversteer" or "mid-oversteer" => new SetupRequest { Symptom = "oversteer", Phase = "mid" },
+                    "ran-wide" => new SetupRequest { Symptom = "understeer", Phase = "exit" },
+                    "kerb" => new SetupRequest { Symptom = "kerbs", Phase = "all" },
+                    _ => null,
+                };
+                if (req != null) todo.Add(new SheetTodo { Symptom = req.Symptom, Phase = req.Phase, Reason = $"the race: {g.Count()} × {KindWords(g.Key)}" });
+            }
+            int others = crashes.Count(c => !c.SelfInflicted);
+            if (others > 0) findings.Add($"{others} {(others == 1 ? "contact" : "contacts")} that weren't your doing");
+            double drop = double.NaN;
+            if (laps.Count >= 8)
+            {
+                drop = laps.TakeLast(4).Average(l => l.LapTime) - laps.Skip(1).Take(4).Average(l => l.LapTime);
+                if (drop > 0.4) findings.Add($"pace dropped {drop:0.0} a lap from the start to the end of the race");
+            }
+            if (hotR >= 2) { findings.Add($"the rears overheated {hotR} times"); todo.Add(new SheetTodo { Symptom = "tyres-hot-rear", Phase = "all", Reason = $"the race: rears overheated {hotR} times" }); }
+            if (hotF >= 2) { findings.Add($"the fronts overheated {hotF} times"); todo.Add(new SheetTodo { Symptom = "tyres-hot-front", Phase = "all", Reason = $"the race: fronts overheated {hotF} times" }); }
+            if (carWanted.Count > 0)
+            {
+                findings.Add($"still to do from my calls: {InCarAdjustments.Join(carWanted)}");
+                foreach (var a in carWanted)
+                {
+                    var parts = a.Reason.Split(' ', 2);
+                    string phase = a.Reason.Contains("entry") ? "entry" : a.Reason.Contains("exit") ? "exit" : a.Reason.Contains("mid") ? "mid" : "all";
+                    string symptom = a.Reason.StartsWith("understeer") ? "understeer" : a.Reason.StartsWith("oversteer") ? "oversteer" : "";
+                    if (symptom.Length > 0 && !todo.Any(t => t.Symptom == symptom && t.Phase == phase))
+                        todo.Add(new SheetTodo { Symptom = symptom, Phase = phase, Reason = $"the race: {a.Reason} ({a.Words})" });
+                }
+            }
+            if (rep?.Handling is { Valid: true } h)
+            {
+                var top = SetupOptimiser.FromHandling(h, si.CarCategory).FirstOrDefault();
+                if (top != null && !todo.Any(t => t.Symptom == top.Symptom && t.Phase == top.Phase))
+                {
+                    findings.Add($"{top.Symptom} on {(top.Phase == "mid" ? "mid-corner" : top.Phase)} through the race");
+                    todo.Add(new SheetTodo { Symptom = top.Symptom, Phase = top.Phase, Speed = top.Speed, Reason = $"the race: {top.Symptom} on {top.Phase}" });
+                }
+            }
+            var summary = new RaceSummary { Position = pos, Laps = ctx.Laps.Count, Incidents = inc, Best = laps.Count > 0 ? laps.Min(l => l.LapTime) : double.NaN, PaceDrop = drop, Findings = findings };
+            Notes.Update(si.CarPath, si.TrackKey, n =>
+            {
+                n.LastRace = summary;
+                foreach (var t in todo.Take(3))
+                    if (!n.Todo.Any(x => x.Symptom == t.Symptom && x.Phase == t.Phase)) n.Todo.Add(t);
+            }, si);
+            string said = $"Race done{(pos > 0 ? $", P{pos}" : "")}, {inc}x.";
+            if (findings.Count > 0) said += " " + char.ToUpperInvariant(findings[0][0]) + findings[0][1..] + (findings.Count > 1 ? ", and " + string.Join(", ", findings.Skip(1).Take(2)) : "") + ".";
+            if (todo.Count > 0) said += " I've noted what to work on in your next practice here.";
+            else if (findings.Count == 0) said += crashes.Count == 0 ? " No crashes, nothing to change." : " Nothing to change on the car.";
+            Engineer.Say(said, "strategy", 1);
+        });
+    }
+
     // ------------------------------------------------------------------ main loop
 
     void Loop()
@@ -195,6 +533,7 @@ public sealed class TelemetryHub : IDisposable
                 _pendingSource = _live;
                 continue;
             }
+            if (st is SourceStatus.Disconnected or SourceStatus.Ended) Radio.Flush(_source.Frame.SessionTime);
             if (st == SourceStatus.Disconnected)
             {
                 if (_tracker.Current != null) _tracker.Flush();
@@ -214,8 +553,20 @@ public sealed class TelemetryHub : IDisposable
 
             try
             {
+                double dt = double.IsFinite(_prevFrameTime) ? f.SessionTime - _prevFrameTime : 0;
+                _prevFrameTime = f.SessionTime;
                 _tracker.Process(f, _source.WallClock);
+                TyreManager.Update(f, _info.TrackLengthM, dt, f.SessionTime);
+                CarManager.Update(f);
+                Insights.SampleFuel(f);
+                Pit.Update(f, f.OnPitRoad ? ComputeFuel(f) : null, _source.IsLive);
+                Crash.Update(f, f.LapDistPct * _info.TrackLengthM, TyreManager.SteerK, _model, _ref);
+                if (f.PlayerCarPosition > 0) _lastPosition = f.PlayerCarPosition;
+                _lastIncidents = f.PlayerCarMyIncidentCount;
                 UpdateLiveLap(f);
+                if (!_tracker.CurrentLapIsOut) Insights.Update(f, f.LapDistPct * _info.TrackLengthM, _model, _ref, Coach);
+                var (inZone, toZone) = RadioGate.Zone(f.LapDistPct * _info.TrackLengthM, _info.TrackLengthM, _model, _ref);
+                Radio.Tick(f, f.SessionTime, toZone, inZone);
                 UpdateTrail(f);
                 Watch(f);
                 if ((++_frameCount & 1) == 0) PushHistory(f);
@@ -233,6 +584,8 @@ public sealed class TelemetryHub : IDisposable
         bool carTrackChanged = _info == null || _info.CarPath != si.CarPath || _info.TrackKey != si.TrackKey;
         _info = si;
         _tracker.OnSessionInfo(si);
+        CarManager.OnSessionInfo(si);
+        SetupEngineer.OnSessionInfo(si);
         _sectorStarts = SectorStarts(si);
         if (carTrackChanged)
         {
@@ -268,6 +621,8 @@ public sealed class TelemetryHub : IDisposable
         _lapCorners.Clear();
         _lastCorner = null;
         _diskLoggingRequested = false;
+        _lastCmp = null;
+        _recentLaps.Clear();
     }
 
     // ------------------------------------------------------------------ reference handling
@@ -314,6 +669,17 @@ public sealed class TelemetryHub : IDisposable
     void OnSessionStarted(SessionContext ctx)
     {
         ResetSessionState();
+        TyreManager.OnSession(ctx.Info, ctx.SessionType);
+        Coach.Reset(ctx.SessionType);
+        CarManager.Reset(ctx.Info, ctx.SessionType);
+        SetupEngineer.Reset(ctx.Info, ctx.SessionType);
+        Insights.Reset(ctx.Info, ctx.SessionType);
+        InCarAdvisor.Reset();
+        Pit.Reset(ctx.SessionType);
+        Crash.Reset(ctx.SessionType);
+        _notesAnnounced = false;
+        LoadPitPressures(ctx.Info, ctx.DbId);
+        SetupEngineer.OnModel(_model);
         var row = SessionStore.ToRow(ctx, _source.IsLive ? "live" : "ibt");
         Enqueue(() => Store.EnsureSession(ctx, row.Source, _source is IbtSource ibt ? ibt.File.Path : ""));
     }
@@ -322,6 +688,7 @@ public sealed class TelemetryHub : IDisposable
     {
         if (ctx.Laps.Count == 0) return;
         long id = ctx.DbId;
+        if (TyreManager.Kind(ctx.SessionType) == "race") RaceDebrief(ctx);
         Enqueue(() =>
         {
             if (id <= 0) return;
@@ -336,6 +703,11 @@ public sealed class TelemetryHub : IDisposable
     {
         var si = ctx.Info;
         var f = _source.Frame;
+        var stop = _lastStop;
+        _lastStop = null;
+        TyreManager.OnStintStart(stop?.StationaryTime ?? double.NaN, stop == null || stop.TyresChanged);
+        AnnounceNotes(si, ctx.SessionType);
+        SetupEngineer.OnStint();
         if (_source.IsLive && Settings.Current.AutoStartDiskTelemetry && f.HasDiskLoggingVar && !f.DiskLoggingEnabled && !_diskLoggingRequested)
         {
             _diskLoggingRequested = true;
@@ -424,6 +796,7 @@ public sealed class TelemetryHub : IDisposable
                         var cl = ToLive(cc, la.Corners.FirstOrDefault(x => x.Corner == cc.Corner), lap.LapNumber);
                         _lapCorners.Add(cl);
                         _lastCorner = cl;
+                        Coach.OnCorner(cc, lap.LapNumber);
                     }
                 UpdateBestSectors(dl, lap.Valid);
             }
@@ -454,6 +827,19 @@ public sealed class TelemetryHub : IDisposable
         var fuel = ComputeFuel(_source.Frame);
         if (fuel != null) Engineer.Fuel(fuel, isRace, ctx.Laps.Count);
 
+        var fr = _source.Frame;
+        TyreManager.OnLap(lap, _sessionBest);
+        CarManager.OnLap(lap, fr.SessionTimeRemain, fr.SessionLapsRemainEx);
+        SetupEngineer.OnModel(_model);
+        SetupEngineer.OnLap(lap, fr);
+        Insights.OnLap(lap, la);
+        InCarAdvisor.OnModel(_model);
+        InCarAdvisor.OnLap(lap, fr, SetupEngineer.State is not (SetupEngineer.Phase.Off or SetupEngineer.Phase.Done), TyreManager.Snapshot());
+        Insights.OnLapGaps(lap.LapNumber, _standings, fr.PlayerCarIdx, fuel?.LapsRemaining ?? double.NaN);
+        Insights.OnLapFuel(lap.LapNumber, fuel, reference, model);
+        _lastCmp = cmp;
+        if (lap.Valid && !lap.OutLap && !lap.InLap) { _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0); }
+
         // damage heuristic: pace after an incident
         if (_incidentLapWatch >= 0 && lap.LapNumber > _incidentLapWatch && lap.Valid)
         {
@@ -472,6 +858,7 @@ public sealed class TelemetryHub : IDisposable
 
     void OnPitStop(SessionContext ctx, PitStopInfo p)
     {
+        _lastStop = p;
         Enqueue(() => Store.Db.InsertPitStop(Store.EnsureSession(ctx, _source.IsLive ? "live" : "ibt"), p));
         if (p.FuelAdded > 0.5f || p.TyresChanged) Engineer.PitStop(new PitStopSummary(p.StationaryTime, p.FuelAdded, p.TyresChanged));
     }
@@ -564,7 +951,9 @@ public sealed class TelemetryHub : IDisposable
             _lapCorners.Add(cl);
             _lastCorner = cl;
             Engineer.CornerDone(cl);
+            Coach.OnCorner(cc, f.Lap);
         }
+        if (reference != null) Coach.Update(f, d, model, reference);
     }
 
     void UpdateTrail(Frame f)
@@ -747,6 +1136,7 @@ public sealed class TelemetryHub : IDisposable
         {
             _lastSlow = DateTime.Now;
             ComputeField(f, si);
+            if ((DateTime.Now - _pitPlanAt).TotalSeconds > 1) { _pitPlanAt = DateTime.Now; _pitPlanText = Pit.Describe(f, ComputeFuel(f)); }
             _weatherLive = BuildWeather(f);
         }
 
@@ -790,6 +1180,17 @@ public sealed class TelemetryHub : IDisposable
             CarLeftRight = f.CarLeftRight,
             TrackModelVersion = model == null ? 0 : (int)(model.SourceLapId % 1_000_000_000) + 1,
             Messages = Engineer.Recent(),
+            TyreLoad = TyreManager.Snapshot(),
+            CoachTip = Coach.LastTip,
+            SetupState = SetupEngineer.State.ToString(),
+            SetupStatus = SetupEngineer.Status,
+            SetupInstruction = SetupEngineer.Instruction,
+            QuietMode = Radio.Quiet,
+            LastCrash = Crash.Last?.Summary ?? "",
+            CarAdvice = InCarAdvisor.Current.Count > 0 ? "Car adjustments: " + InCarAdjustments.Join(InCarAdvisor.Current) : "",
+            PitPlan = _pitPlanText,
+            SetupSheet = SheetLines(),
+            InCarValues = new Dictionary<string, float>(f.Dc),
         };
 
         if (_tracker.LapInProgress)
@@ -1085,5 +1486,6 @@ public sealed class TelemetryHub : IDisposable
         try { _tracker.Flush(); } catch { }
         _source.Dispose();
         _live.Dispose();
+        CrewChief.Dispose();
     }
 }

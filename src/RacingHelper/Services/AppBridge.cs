@@ -24,4 +24,16 @@ public sealed class AppBridge : IAppBridge
     public void OpenFolder(string path) => Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
 
     public IReadOnlyList<OverlayInfo> OverlayCatalog => Web.OverlayCatalog.All;
+
+    public async Task<ButtonPress?> LearnButton(int timeoutMs)
+    {
+        var wheel = _app.Wheel;
+        if (wheel == null) return null;
+        var task = await _app.Dispatcher.InvokeAsync(() => wheel.Learn(timeoutMs));
+        return await task;
+    }
+
+    public IReadOnlyList<string> ApplyHotkeys() => _app.Dispatcher.Invoke(() => _app.ApplyHotkeys());
+
+    public IReadOnlyList<string> Controllers() => _app.Wheel == null ? Array.Empty<string>() : _app.Dispatcher.Invoke(() => _app.Wheel.Controllers());
 }

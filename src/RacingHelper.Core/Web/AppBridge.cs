@@ -1,5 +1,7 @@
 namespace RacingHelper.Web;
 
+public sealed record ButtonPress(string Device, string DeviceName, int Button);
+
 public sealed record OverlayInfo(string Id, string Name, string Description, double Width, double Height, bool DefaultOn);
 
 /// <summary>Things only the desktop shell can do (voice, overlay windows, opening folders).</summary>
@@ -11,6 +13,11 @@ public interface IAppBridge
     void OverlaysChanged();
     void OpenFolder(string path);
     IReadOnlyList<OverlayInfo> OverlayCatalog { get; }
+    /// <summary>Waits for the next button press on any wheel / button box (null on timeout or if unsupported).</summary>
+    Task<ButtonPress?> LearnButton(int timeoutMs);
+    IReadOnlyList<string> Controllers();
+    /// <summary>(Re)registers the keyboard shortcuts from settings; returns the ones Windows refused (already in use / unknown key).</summary>
+    IReadOnlyList<string> ApplyHotkeys();
 }
 
 public static class OverlayCatalog

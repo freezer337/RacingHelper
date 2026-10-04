@@ -82,6 +82,18 @@ public sealed class WebServer : IAsyncDisposable
 
     static IResult J(object? o) => Results.Json(o, Json);
 
+    /// <summary>Things the desktop app does itself (bindable to keys and wheel buttons like the questions).</summary>
+    public static readonly (string id, string label)[] AppActions =
+    {
+        ("overlays-edit", "Move / resize overlays (press again to lock)"),
+        ("overlays-toggle", "Hide / show all overlays"),
+        ("reference", "Switch delta reference: PB → session best → last lap"),
+        ("dashboard", "Open the dashboard"),
+    };
+
+    static IEnumerable<(string id, string label)> AllActions => AppActions.Concat(TelemetryHub.Questions);
+    IReadOnlyList<string> _keyErrors = Array.Empty<string>();
+
     void Map(WebApplication app)
     {
         // ---------------- status / live ----------------
@@ -89,6 +101,7 @@ public sealed class WebServer : IAsyncDisposable
         {
             status = _hub.State.Status,
             source = _hub.State.Source,
+            version = AppInfo.Version,
             replay = _hub.IsReplay,
             dataFolder = S.DataFolder,
             dbFile = Path.Combine(S.DataFolder, "racinghelper.db"),
@@ -122,7 +135,79 @@ public sealed class WebServer : IAsyncDisposable
         });
         app.MapGet("/api/track/current", () => J(_hub.Model));
         app.MapGet("/api/engineer", () => J(_hub.Engineer.Recent(50)));
-        app.MapPost("/api/engineer/test", () => { _app.Speak("Radio check. Racing Helper, loud and clear."); return J(new { ok = true }); });
+        app.MapPost("/api/engineer/test", () =>
+        {
+            const string text = "Radio check. Racing Helper, loud and clear.";
+            if (_hub.CrewChief.UseCrewChief) _hub.CrewChief.Send(text, 2); else _app.Speak(text);
+            return J(new { ok = true, via = _hub.CrewChief.UseCrewChief ? "crewchief" : "windows" });
+        });
+        app.MapGet("/api/crewchief", () => J(_hub.CrewChief.Describe()));
+
+        // ---------------- questions & wheel buttons ----------------
+        app.MapPost("/api/ask/{id}", (string id) => J(new { answer = _hub.Ask(id) }));
+        app.MapGet("/api/controls", () => J(new
+        {
+            questions = AllActions.Select(q => new { q.id, q.label, hotkey = S.EffectiveKeys().FirstOrDefault(k => k.Action == q.id)?.Keys, app = AppActions.Any(a => a.id == q.id) }),
+            keyErrors = _keyErrors,
+            bindings = S.ButtonBindings,
+            controllers = _app.Controllers(),
+            quiet = _hub.Radio.Quiet,
+        }));
+        app.MapPost("/api/controls/learn", async (HttpRequest req) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(req.Body, Json) ?? new();
+            var action = body.GetValueOrDefault("action") ?? "";
+            if (!AllActions.Any(q => q.id == action)) return J(new { ok = false, error = "Unknown action" });
+            var press = await _app.LearnButton(10000);
+            if (press == null) return J(new { ok = false, error = "No button pressed within 10 seconds." });
+            _hub.Settings.Update(s =>
+            {
+                s.ButtonBindings.RemoveAll(b => b.Action == action || (b.Device == press.Device && b.Button == press.Button));
+                s.ButtonBindings.Add(new ButtonBinding { Action = action, Device = press.Device, DeviceName = press.DeviceName, Button = press.Button });
+            });
+            return J(new { ok = true, binding = S.ButtonBindings.First(b => b.Action == action) });
+        });
+        app.MapPost("/api/controls/key", async (HttpRequest req) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(req.Body, Json) ?? new();
+            var action = body.GetValueOrDefault("action") ?? "";
+            var keys = (body.GetValueOrDefault("keys") ?? "").Trim();
+            if (!AllActions.Any(q => q.id == action)) return J(new { ok = false, error = "Unknown action" });
+            _hub.Settings.Update(s =>
+            {
+                var list = s.EffectiveKeys();
+                list.RemoveAll(k => k.Action == action || (keys.Length > 0 && string.Equals(k.Keys, keys, StringComparison.OrdinalIgnoreCase)));
+                if (keys.Length > 0) list.Add(new KeyBinding { Action = action, Keys = keys });
+                s.KeyBindings = list;
+            });
+            _keyErrors = _app.ApplyHotkeys();
+            bool failed = _keyErrors.Any(e => e.StartsWith(keys + " ", StringComparison.OrdinalIgnoreCase));
+            return J(new { ok = !failed, error = failed ? $"Windows wouldn't give Racing Helper {keys}: another program already uses it. Pick another." : null });
+        });
+        app.MapPost("/api/controls/keys-reset", () =>
+        {
+            _hub.Settings.Update(s => s.KeyBindings = null);
+            _keyErrors = _app.ApplyHotkeys();
+            return J(new { ok = true });
+        });
+        app.MapPost("/api/controls/clear", async (HttpRequest req) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(req.Body, Json) ?? new();
+            var action = body.GetValueOrDefault("action") ?? "";
+            _hub.Settings.Update(s => s.ButtonBindings.RemoveAll(b => b.Action == action));
+            return J(new { ok = true });
+        });
+        app.MapGet("/api/setup-session", () => J(new { state = _hub.SetupEngineer.State.ToString(), status = _hub.SetupEngineer.Status, instruction = _hub.SetupEngineer.Instruction, describe = _hub.SetupEngineer.Describe(), laps = _hub.SetupEngineer.LapsPerRun }));
+        app.MapPost("/api/crewchief/configure", () =>
+        {
+            var (ok, message) = _hub.CrewChief.ConfigureCrewChief();
+            return J(new { ok, message });
+        });
+        app.MapPost("/api/crewchief/restart", async () =>
+        {
+            await _hub.CrewChief.RestartAsync();
+            return J(_hub.CrewChief.Describe());
+        });
         app.MapGet("/api/voices", () => J(_app.Voices()));
 
         // ---------------- sessions & laps ----------------
@@ -321,7 +406,11 @@ public sealed class WebServer : IAsyncDisposable
             if (incoming == null) return Results.BadRequest();
             incoming.Overlays = S.Overlays; // overlays have their own endpoint
             incoming.TyreTargets = S.TyreTargets;
+            incoming.ButtonBindings = S.ButtonBindings;   // bindings have their own endpoints
+            incoming.KeyBindings = S.KeyBindings;
+            bool restartCrewChief = incoming.CrewChiefEnabled != S.CrewChiefEnabled || incoming.CrewChiefPort != S.CrewChiefPort;
             _hub.Settings.Replace(incoming);
+            if (restartCrewChief) await _hub.CrewChief.RestartAsync();
             return J(new { ok = true });
         });
         app.MapGet("/api/overlays", () => J(new

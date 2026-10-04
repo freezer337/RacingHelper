@@ -303,6 +303,10 @@ public static class SetupOptimiser
     }
 
     // values that change while driving rather than being setup choices
-    static bool Volatile(string key) => key.Contains("LastHot") || key.Contains("LastTemps") || key.Contains("TreadRemaining") || key.EndsWith("UpdateCount")
+    /// <summary>Does a flattened setup key belong to this optimiser parameter (e.g. "Rear anti-roll bar")?</summary>
+    public static bool Matches(string param, string key)
+        => (ParamKeys.TryGetValue(param, out var pattern) && new Regex(pattern, RegexOptions.IgnoreCase).IsMatch(key)) || key == param;
+
+    public static bool Volatile(string key) => key.Contains("LastHot") || key.Contains("LastTemps") || key.Contains("TreadRemaining") || key.EndsWith("UpdateCount")
                                         || key.Contains("CornerWeight") || key.Contains("Defl") || key.Contains("AeroCalculator");
 }
