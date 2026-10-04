@@ -82,6 +82,8 @@ Open **Live pace** in the dashboard (a second monitor, alt-tab, or a phone/table
 
 When you're not on track it shows your last session.
 
+**Phone says "unreachable"?** Settings → *Phone & tablet access* checks it for you: it shows the right address (your real Wi-Fi/Ethernet one, not a VPN or virtual adapter), whether Windows Firewall blocks Racing Helper (Windows adds a hidden block rule when its firewall popup is cancelled, and most home networks count as "Public"), and an **Allow through Windows Firewall** button that fixes it after the admin prompt. It removes the block rules and lets in only devices on your own network. The phone also has to be on the same Wi-Fi (not mobile data or a guest network), and some routers keep Wi-Fi devices apart ("AP isolation").
+
 ### Radio mode: practice, qualifying, race
 
 By default the radio changes with the session (**Settings → Race engineer → Radio mode → Automatic by session**):

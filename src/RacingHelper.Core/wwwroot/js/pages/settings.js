@@ -90,10 +90,7 @@ export async function render(root) {
           <label class="field">Dashboard port <span class="dim">(restart to apply)</span><input type="number" id="webPort" value="${s.webPort}"></label>
         </div>
         <div style="margin-top:12px">${chk('allowLan', s.allowLan, 'Allow opening the dashboard from other devices on my network (e.g. a phone or tablet next to the rig) — restart Racing Helper to apply')}</div>
-        <div class="small" style="margin-top:8px">${status.lanUrls?.length
-          ? `On your phone or tablet (same Wi-Fi as this PC), open: ${status.lanUrls.map(u => `<b class="num">${esc(u)}#/pace</b>`).join(' or ')}. If it doesn't load, allow Racing Helper through Windows Firewall for private networks.`
-          : s.allowLan ? '<span class="muted">Restart Racing Helper (tray icon → Exit, then start it again) and the address for your phone appears here.</span>'
-          : '<span class="muted">Turn this on, save, and restart Racing Helper: the address to type on your phone appears here.</span>'}</div>
+        <div class="small" id="lan" style="margin-top:10px"><span class="muted">Checking phone &amp; tablet access…</span></div>
       </div>
     </div>`;
   const radioCheck = async () => {
@@ -141,6 +138,7 @@ export async function render(root) {
     el.innerHTML = ccStatus(await api('/api/crewchief').catch(() => null));
   }
   const ccTimer = setInterval(() => { if (!document.body.contains(root.querySelector('#cc-status'))) clearInterval(ccTimer); else refreshCc(); }, 3000);
+  loadLan(root);
   $('#save', root).onclick = () => save();
   async function save(quiet) {
     const v = id => $('#' + id, root);
@@ -226,4 +224,41 @@ function controlsHtml(c) {
     ${c.keyErrors?.length ? `<p class="small bad" style="margin:8px 0 0">Couldn't register: ${c.keyErrors.map(esc).join(', ')}</p>` : ''}
     <p class="small muted" style="margin:8px 0 0">Keyboard shortcuts work while iRacing is in front. Avoid keys iRacing itself uses (plain F1–F12, letters): combinations like Ctrl+Shift+… or F13–F24 are safest. <button class="small" data-act="keysreset">Reset keys to defaults</button></p>
     ${c.quiet ? '<p class="small warn" style="margin:8px 0 0">Quiet mode is on: only important calls.</p>' : ''}`;
+}
+
+// Phone / tablet access: the address to type, and whether Windows Firewall lets it through (with a one-click fix).
+async function loadLan(root) {
+  const el = $('#lan', root);
+  if (!el) return;
+  const r = await api('/api/lan').catch(() => null);
+  if (!r || !el.isConnected) { if (el.isConnected) el.innerHTML = ''; return; }
+  if (!r.listening) {
+    el.innerHTML = `<span class="muted">${r.allowLan ? 'Restart Racing Helper (tray icon → Exit, then start it again) to switch it on. Then the address for your phone appears here.' : 'Turn this on, save, and restart Racing Helper. Then the address to type on your phone appears here.'}</span>`;
+    return;
+  }
+  const best = r.addresses.find(a => a.likely) || r.addresses[0];
+  const others = r.addresses.filter(a => a !== best);
+  const fw = !r.windows ? '' : r.firewallBlocks > 0
+    ? `<div class="bad" style="margin-top:8px"><b>Windows Firewall is blocking Racing Helper</b> (${r.firewallBlocks} block rule${r.firewallBlocks > 1 ? 's' : ''}, Windows adds one when its firewall popup is closed or cancelled). That's why your phone can't reach it.</div>`
+    : r.firewallRule ? `<div class="good" style="margin-top:8px">Windows Firewall: allowed for devices on your home network.</div>`
+    : `<div class="warn" style="margin-top:8px">Windows Firewall probably blocks other devices (most home networks are set to "Public" in Windows).</div>`;
+  el.innerHTML = `
+    ${best ? `<div>On your phone or tablet, type exactly: <b class="num" style="font-size:15px">${esc(best.url)}#/pace</b> <span class="muted">(${esc(best.adapter)})</span></div>` : '<div class="bad">No network address found. Is the PC connected to your router?</div>'}
+    ${others.length ? `<div class="muted" style="margin-top:4px">If that one doesn't work, this PC also has: ${others.map(a => `<span class="num">${esc(a.url)}</span> (${esc(a.adapter)})`).join(', ')}</div>` : ''}
+    ${fw}
+    ${r.windows && !(r.firewallRule && !r.firewallBlocks) ? `<div style="margin-top:6px"><button class="small primary" id="lan-fix">Allow through Windows Firewall</button> <span class="muted">Windows asks for your OK. Only devices on your own network get in.</span></div>` : ''}
+    ${r.networks?.length ? `<div class="muted" style="margin-top:6px">Network: ${r.networks.map(esc).join(', ')}</div>` : ''}
+    <details style="margin-top:8px"><summary class="muted">Still "unreachable"?</summary><ul class="steps small" style="margin:6px 0 0">
+      <li>The phone must be on the <b>same Wi-Fi</b> as the PC: mobile data off, not a guest network.</li>
+      <li>Type it with <b>http://</b> (not https) and the port number, exactly as shown.</li>
+      <li>Some routers keep Wi-Fi devices apart ("AP isolation" / "client isolation"), or the 5 GHz and 2.4 GHz networks apart. Try the other Wi-Fi band or turn isolation off in the router.</li>
+      <li>A VPN on the phone or PC can get in the way: switch it off.</li>
+    </ul></details>`;
+  const fix = $('#lan-fix', el);
+  if (fix) fix.onclick = async () => {
+    fix.disabled = true; fix.textContent = 'Waiting for Windows…';
+    const res = await api('/api/lan/firewall', { body: {} }).catch(e => ({ ok: false, message: e.message }));
+    toast(res.message, !res.ok);
+    loadLan(root);
+  };
 }
