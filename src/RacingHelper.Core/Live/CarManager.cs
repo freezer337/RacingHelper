@@ -24,6 +24,9 @@ public sealed class CarManager
     double _lastLapTime = double.NaN;
 
 
+    /// <summary>Stopped in the pit box (true = after driving, false = at the start of the session).</summary>
+    public event Action<bool>? InBox;
+
     public CarManager(RaceEngineer engineer, Func<AppSettings> settings)
     {
         _eng = engineer;
@@ -69,6 +72,7 @@ public sealed class CarManager
         bool driven = _lapsSinceStall >= 1;
         _lapsSinceStall = 0;
         if (driven) TyreReport(f);
+        InBox?.Invoke(driven);
     }
 
     void TyreReport(Frame f)

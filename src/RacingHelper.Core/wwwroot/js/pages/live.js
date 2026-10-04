@@ -177,6 +177,8 @@ function update(el, s) {
   set('setup-toggle', running ? 'Stop' : 'Start');
   $('#setupsess', el).innerHTML = (s.setupInstruction ? `<div class="warn" style="font-weight:600;margin-bottom:6px">To do: ${esc(s.setupInstruction)}</div>` : '')
     + `<div class="small ${s.setupStatus ? '' : 'muted'}">${esc(s.setupStatus || 'Drive a run, change one thing, compare. Start it here or from a wheel button.')}</div>`
+    + (s.setupSheet?.length ? `<div class="small" style="margin-top:8px"><b>Setup sheet</b><ul style="margin:4px 0 0 18px;padding:0">${s.setupSheet.map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '')
+    + (s.lastCrash ? `<div class="small bad" style="margin-top:8px"><b>Last incident:</b> ${esc(s.lastCrash)}</div>` : '')
     + (s.quietMode ? '<div class="small warn" style="margin-top:6px">Quiet mode on — only important calls.</div>' : '');
 
   const f = s.fuel;

@@ -45,6 +45,10 @@ public sealed class SetupEngineer
 
     public Phase State { get; private set; } = Phase.Off;
     readonly HashSet<string> _carDc = new();   // in-car adjustments this car has
+    /// <summary>Per car + track memory: the preset (changes that proved better) and things to try (crashes, races).</summary>
+    public CarNotesStore? Notes { get; set; }
+    List<(string key, string a, string b)> _lastDiff = new(), _changeDiff = new(), _carryDiff = new();
+    SheetTodo? _fromTodo;
     public int LapsPerRun => Math.Clamp(_settings().SetupRunLaps, 3, 10);
     public string Status { get; private set; } = "";
     public string? Instruction { get; private set; }
@@ -82,10 +86,43 @@ public sealed class SetupEngineer
     {
         if (_si == null) { _eng.Say("Get in the car first, then we'll start the setup work.", "setup", 1, immediate: !auto); return; }
         _base = NewRun("current setup");
-        _test = null; _req = null; _change = null; _iteration = 0; _reverting = false;
-        State = Phase.Baseline;
+        _test = null; _req = null; _change = null; _iteration = 0; _reverting = false; _fromTodo = null;
         string fixedNote = _fixed ? " It's a fixed setup, so I'll only suggest in-car adjustments." : "";
+        if (PlanFromNotes(out string plan))
+        {
+            Say($"Setup session.{fixedNote} {plan}", 2, auto);
+            return;
+        }
+        State = Phase.Baseline;
         Say($"Setup session. Give me {LapsPerRun} clean laps at a steady pace and I'll work out the first change.{fixedNote}", 1, auto);
+    }
+
+    /// <summary>Something from your last race / crashes here to try first? Then that's the first change, before any run.</summary>
+    bool PlanFromNotes(out string plan)
+    {
+        plan = "";
+        var si = _si;
+        if (si == null || Notes == null) return false;
+        var notes = Notes.Get(si.CarPath, si.TrackKey);
+        foreach (var todo in notes.Todo.ToList())
+        {
+            var req = new SetupRequest { Symptom = todo.Symptom, Phase = todo.Phase, Speed = todo.Speed, Category = si.CarCategory };
+            var adv = SetupOptimiser.Advise(req, si.CarSetup);
+            var change = adv.Changes.FirstOrDefault(c => !c.Why.Contains("not found") && !_tried.Contains(c.Parameter) && (!_fixed || InCar(c.Parameter)));
+            if (change == null) continue;
+            _req = req; _change = change; _fromTodo = todo; _iteration++;
+            _tried.Add(change.Parameter);
+            string words = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, todo.Reason) is { } said
+                ? said.Words : $"{change.Parameter}, {change.Action}";
+            string now = change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
+            State = Phase.WaitChange;
+            Instruction = InCar(change.Parameter) ? Cap(words) : $"{change.Parameter}: {change.Action}";
+            plan = InCar(change.Parameter)
+                ? $"Before the run, from {todo.Reason}: in the car, {words}.{now} Then {LapsPerRun} laps."
+                : $"Before you go out, from {todo.Reason}: in the garage, {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.";
+            return true;
+        }
+        return false;
     }
 
     public void Stop()
@@ -115,6 +152,7 @@ public sealed class SetupEngineer
         _setupHash = h;
         if (old == null || old.CarPath != si.CarPath || old.CarSetup == null) return;   // first look at this car, not a change
         var diff = SetupOptimiser.Diff(old?.CarSetup, si.CarSetup);
+        _lastDiff = diff;
         SetupChanged(diff.Select(d => $"{Short(d.key)} {d.a} to {d.b}").ToList(), diff.Select(d => d.key).ToList());
     }
 
@@ -170,9 +208,22 @@ public sealed class SetupEngineer
             if (_base is { Laps.Count: > 0 }) Recommend(_base, first: false);
             else { State = Phase.Baseline; Say($"Give me {LapsPerRun} clean laps on this."); }
         }
+        else if (State == Phase.WaitChange && _change != null && _fromTodo != null)
+        {
+            // the change carried over from a race / crashes: run it, then keep working from there
+            var todo = _fromTodo;
+            _fromTodo = null;
+            if (_si != null) Notes?.Update(_si.CarPath, _si.TrackKey, n => n.Todo.RemoveAll(t => t.Symptom == todo.Symptom && t.Phase == todo.Phase), _si);
+            _carryDiff = _lastDiff.ToList();   // goes into the preset once a run on this setup proves better
+            _base = NewRun(_change.Parameter);
+            State = Phase.Baseline;
+            Instruction = null;
+            Say($"Got it: {what}. Now {LapsPerRun} clean laps on that.");
+        }
         else if (State == Phase.WaitChange && _change != null)
         {
             bool expected = keys.Any(k => SetupOptimiser.Matches(_change.Parameter, k));
+            _changeDiff = _lastDiff.ToList();
             _test = NewRun(_change.Parameter);
             State = Phase.Evaluate;
             Instruction = null;
@@ -240,6 +291,7 @@ public sealed class SetupEngineer
             : "";
         if (_iteration >= 4 && !worse)
         {
+            if (better) RememberInPreset(pace);
             State = Phase.Done; Instruction = null;
             Say($"{(better ? "That change works" : "No clear difference")}: {pace}{balance}. {(better ? "Keep it." : "Keep whichever feels better.")} That's four changes, the setup's dialled in as far as the data goes.", 2);
             return;
@@ -253,6 +305,7 @@ public sealed class SetupEngineer
             return;
         }
         Say(better ? $"That change works: {pace}{balance}. Keep it." : $"No clear difference: {pace}{balance}. Keep whichever feels better, I'll carry on from this one.", 2);
+        if (better) RememberInPreset(pace);
         _base = b;   // the current setup is the baseline for the next step
         Recommend(b, first: false);
     }
@@ -263,6 +316,30 @@ public sealed class SetupEngineer
         var cells = rep.Cells.Where(c => c.Phase == _req.Phase || _req.Phase == "all").ToList();
         if (cells.Count == 0) return float.NaN;
         return cells.Average(c => _req.Symptom == "understeer" ? c.UndersteerRate : c.OversteerRate);
+    }
+
+    /// <summary>A change that proved better goes into this car + track's preset (one sheet, updated in place).</summary>
+    void RememberInPreset(string pace)
+    {
+        var si = _si;
+        if (si == null || Notes == null || (_changeDiff.Count == 0 && _carryDiff.Count == 0)) return;
+        var diff = _changeDiff.ToList();
+        var carry = _carryDiff.ToList();
+        Notes.Update(si.CarPath, si.TrackKey, n =>
+        {
+            foreach (var (key, _, b) in carry)
+            {
+                n.Preset[key] = b;
+                n.PresetWhy[key] = $"from the last race, confirmed in practice ({DateTime.Now:d MMM})";
+            }
+            foreach (var (key, _, b) in diff)
+            {
+                n.Preset[key] = b;
+                n.PresetWhy[key] = $"{pace} ({DateTime.Now:d MMM})";
+            }
+        }, si);
+        _changeDiff.Clear();
+        _carryDiff.Clear();
     }
 
     public string Describe() => State switch

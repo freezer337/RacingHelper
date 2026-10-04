@@ -87,6 +87,20 @@ Verbosity is set in Settings.
   - iRacing doesn't let other apps change the garage setup (springs, wing, garage anti-roll bars…). Its chat / pit commands only cover pit service: fuel, tyres, pressures, compound, tear-off, fast repair. So for garage items you make the change and the app checks it. In fixed-setup sessions it only suggests in-car adjustments.
   - It starts on its own in practice, or from the Live page or a wheel button. The run length (3–10 laps) is in Settings.
 - **In-car adjustments, said not done.** Every few clean laps it checks your balance. If brake bias, TC, ABS or an in-car anti-roll bar would help, it tells you all of them in one sentence. For example: "Car adjustments: increase TC by 1, and move brake bias back 0.5. That's for oversteer on exit and understeer on entry." You make the change; it notices ("Got it: TC 4") and judges the new settings on fresh laps. It only suggests what your car actually has.
+- **Setup sheet / preset (one per car and track).** Every change that proves quicker in a setup session goes into a preset for that car and track. Example: "Rear wing: add rear wing. It's on 1 deg now" → "That change works: 0.35 quicker. Keep it" → preset `RearWingAngle 2 deg`.
+  - It's kept in one file that is rewritten in place, never duplicated: `Documents\RacingHelper\SetupSheets\<car>\<track>.txt`.
+  - When you're in the pit box in practice (or at the start of a session), the engineer reads out any preset values your current setup doesn't have: "Setup sheet: Aero RearWingAngle to 2 deg, you're on 1 deg."
+  - iRacing doesn't let other apps write `.sto` setup files or change the garage setup, so you set the values in the garage and save. The app checks that you did.
+- **Crash analysis.** After a spin, crash or contact (2x and above), it looks at the seconds before and tells you what started it once you've slowed down:
+  - power oversteer (throttle while still turning)
+  - the rear stepping out under braking
+  - lift-off oversteer
+  - a kerb strike
+  - running wide, or carrying too much speed compared with your reference
+  - contact with another car. In races it also says whether it was your doing ("Contact from behind at turn 1. Not your doing.").
+
+  Each comes with a driving tip. The second time the same thing happens, it adds the setup fix (in-car first, e.g. "increase TC by 1"). Real example from a Bathurst session: "Power oversteer at turn 2: throttle on while the car was still turning, and the rear let go. Into the wall. Squeeze the throttle in and wait until the steering starts to unwind."
+- **Race debrief → next practice.** After a race: your position, incidents, crashes (yours vs others), pace drop over the race, tyre overheating and any of the engineer's calls you didn't act on. Anything worth fixing is saved for that car and track. In the next practice there, the setup session starts with it: "Before you go out, from the race: 2 × power oversteer. In the garage, rear anti-roll bar, soften one step." Then it runs and judges it as usual, and a change that proves good goes into the preset. The session briefing also reminds you where you went off last time.
 - **Automatic pit service.** As you enter pit road, it fills in iRacing's pit menu for you, then says what it set:
   - fuel to the finish (plus your safety margin)
   - four tyres if enough laps are left, with the cold pressures your last run here says you need
@@ -111,6 +125,8 @@ Bind any question to a button on your wheel or button box in **Settings → Whee
 | Where's the time? | "Your best corners add up to 0.46 quicker than your best lap. Most of it at turn 1, 0.24 and turn 3, 0.13." | |
 | Setup session status, and start/stop | "Testing Rear anti-roll bar: 2 of 5 clean laps done." | |
 | What should I change in the car? | "Car adjustments: increase TC by 1, and move brake bias back 0.5." | |
+| What's on my setup sheet? | "Your preset here differs from the car: Aero RearWingAngle should be 2 deg, you're on 1 deg." | |
+| Why did I crash? | the last crash explanation | |
 | What will you set at my pit stop? | "When you box I'll set: 7 litres, four tyres at 176, 177, 171, 172 kPa, tear-off." | |
 | Repeat the last message | | `Ctrl+Shift+F8` |
 | Quiet mode on/off | Only important calls until you switch it back | |

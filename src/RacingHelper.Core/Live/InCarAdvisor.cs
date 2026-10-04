@@ -24,6 +24,9 @@ public sealed class InCarAdvisor
     TrackModel? _model;
 
     public IReadOnlyList<AdjustAdvice> Current => _advice;
+    /// <summary>Advice given this session that you didn't act on (for the debrief).</summary>
+    public IReadOnlyList<AdjustAdvice> Unresolved => _unresolved;
+    List<AdjustAdvice> _unresolved = new();
 
     public InCarAdvisor(RaceEngineer engineer, Func<AppSettings> settings)
     {
@@ -33,7 +36,7 @@ public sealed class InCarAdvisor
 
     public void Reset()
     {
-        _carDc.Clear(); _laps.Clear(); _values = new(); _advice = new();
+        _carDc.Clear(); _laps.Clear(); _values = new(); _advice = new(); _unresolved = new();
         _lastSaid = ""; _repeats = 0; _quietUntilLap = 0; _lapsSinceAdvice = 0;
     }
 
@@ -66,6 +69,7 @@ public sealed class InCarAdvisor
         {
             _repeats = 0;
             string why = string.Join(" and ", _advice.Select(a => a.Reason).Distinct());
+            foreach (var a in _advice) { _unresolved.RemoveAll(u => u.Adj == a.Adj); _unresolved.Add(a); }
             _eng.Say($"Car adjustments: {words}. That's for {why}.", "setup", 1);
         }
         _lastSaid = words;
@@ -79,7 +83,8 @@ public sealed class InCarAdvisor
         var changed = InCarAdjustments.All.Where(a => now.ContainsKey(a.Var) && _values.TryGetValue(a.Var, out var o) && Math.Abs(o - now[a.Var]) > 1e-4f).ToList();
         if (changed.Count == 0) return;
         string what = string.Join(", ", changed.Select(a => $"{a.Spoken} {InCarAdjustments.Num(now[a.Var])}"));
-        bool asked = changed.Any(c => _advice.Any(x => x.Adj == c));
+        bool asked = changed.Any(c => _advice.Any(x => x.Adj == c) || _unresolved.Any(x => x.Adj == c));
+        _unresolved.RemoveAll(u => changed.Contains(u.Adj));
         _eng.Say(asked ? $"Got it: {what}. I'll see how that goes." : $"Noted: {what}.", "setup", 0, minVerbosity: asked ? 0 : 1);
         _values = now;
         _laps.Clear();                 // judge the new settings on their own laps

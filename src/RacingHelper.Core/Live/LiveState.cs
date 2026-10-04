@@ -225,6 +225,8 @@ public sealed class LiveState
     public string SetupStatus { get; set; } = "";
     public string? SetupInstruction { get; set; }
     public bool QuietMode { get; set; }
+    public string LastCrash { get; set; } = "";
+    public List<string> SetupSheet { get; set; } = new();     // preset values that differ from the car + things to try
     public Dictionary<string, float> InCarValues { get; set; } = new();   // live in-car adjustment values by iRacing var name
     public WeatherLive Weather { get; set; } = new();
     public HealthLive Health { get; set; } = new();

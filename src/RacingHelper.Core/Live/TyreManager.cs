@@ -87,6 +87,9 @@ public sealed class TyreManager
 
     bool Enabled => _settings().TyreManager;
 
+    /// <summary>Steering → yaw calibration (v·δ/r) for this car; NaN until learned.</summary>
+    public float SteerK => _k;
+
     public TyreManagerLive Snapshot() => new()
     {
         State = _hotFront && _hotRear ? "hot" : _hotFront ? "hot-front" : _hotRear ? "hot-rear" : _cold ? "cold" : _base != null ? "ok" : "learning",
@@ -106,6 +109,7 @@ public sealed class TyreManager
     {
         string key = si.CarPath + "|" + si.TrackKey;
         _sessionKind = Kind(sessionType);
+        HotFrontCount = HotRearCount = 0;
         if (key == _key) return;
         _key = key;
         _base = null; _baseLapWork = float.NaN; _baseFromSession = false; _cands.Clear();
@@ -292,7 +296,7 @@ public sealed class TyreManager
         {
             bool hot = a == 0 ? _hotFront : _hotRear, was = a == 0 ? wasFront : wasRear;
             var p = _plan[a];
-            if (hot && !was) StartPlan(a);
+            if (hot && !was) { StartPlan(a); if (a == 0) HotFrontCount++; else HotRearCount++; }
             else if (!hot && was)
             {
                 quickerThanPlanned |= float.IsFinite(p.FirstFinish) && p.Elapsed < p.FirstFinish - 0.4f * Bins;
@@ -452,6 +456,10 @@ public sealed class TyreManager
         }
         return $"Tyres are good. {load} You can push.";
     }
+
+    /// <summary>How many times each axle overheated this session (for the race debrief).</summary>
+    public int HotFrontCount { get; private set; }
+    public int HotRearCount { get; private set; }
 
     void Announce(string text, int prio)
     {
