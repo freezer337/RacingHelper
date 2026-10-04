@@ -353,8 +353,11 @@ public sealed class WebServer : IAsyncDisposable
                 if (rep.Tyres[0].TempStatus == "hot" || rep.Tyres[1].TempStatus == "hot") reqs.Add(new SetupRequest { Symptom = "tyres-hot-front", Category = category });
                 if (rep.Tyres[2].TempStatus == "hot" || rep.Tyres[3].TempStatus == "hot") reqs.Add(new SetupRequest { Symptom = "tyres-hot-rear", Category = category });
             }
-            if (rep.Style is { Wheelspins: > 2 }) reqs.Add(new SetupRequest { Symptom = "traction", Category = category });
-            if (rep.Corners.Sum(c => c.Lockups) > 2) reqs.Add(new SetupRequest { Symptom = "front-lockup", Category = category });
+            // only a pattern, not the odd moment: on at least every other lap
+            int often = Math.Max(3, (rep.ValidLaps + 1) / 2);
+            if (rep.Style?.Wheelspins >= often) reqs.Add(new SetupRequest { Symptom = "traction", Category = category });
+            if (rep.Corners.Sum(c => c.LockupsFront) >= often) reqs.Add(new SetupRequest { Symptom = "front-lockup", Category = category });
+            if (rep.Corners.Sum(c => c.LockupsRear) >= often) reqs.Add(new SetupRequest { Symptom = "rear-lockup", Category = category });
             return J(new { handling = rep.Handling, items = reqs.Select(q => new { request = q, advice = SetupOptimiser.Advise(q, setup) }), source });
         });
         app.MapGet("/api/setup/current", (long? session) =>

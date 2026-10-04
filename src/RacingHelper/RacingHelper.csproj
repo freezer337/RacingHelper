@@ -10,7 +10,7 @@
     <AssemblyName>RacingHelper</AssemblyName>
     <RootNamespace>RacingHelper.App</RootNamespace>
     <Product>Racing Helper</Product>
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 

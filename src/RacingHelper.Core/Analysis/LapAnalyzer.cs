@@ -132,8 +132,12 @@ public static class LapAnalyzer
             if (lap.Brake[i] < 0.03f && lap.Throttle[i] < 0.05f && lap.Speed[i] > 10) coast++;
         m.CoastLen = coast * lap.Step;
 
-        // lockups / wheelspin / ABS from wheel speeds where available
+        // lockups / wheelspin / ABS from wheel speeds where available. Under hard braking the fronts normally run 5–15 %
+        // slow (that's where peak braking grip is) and the inside front on a hairpin more, so only a wheel turning 30 %+
+        // slower than the car for 6 m counts as locked. Wheelspin uses the average of the rears (the outside rear runs
+        // faster in a corner anyway).
         int lf = 0, lr = 0, spin = 0;
+        int lockRun = Math.Max(1, (int)Math.Ceiling(6 / lap.Step)), spinRun = Math.Max(1, (int)Math.Ceiling(6 / lap.Step));
         for (int i = s0; i <= s1; i++)
         {
             float v = lap.Speed[i];
@@ -141,17 +145,17 @@ public static class LapAnalyzer
             if (lap.Abs[i] > 0.5f) m.AbsUsed = true;
             if (lap.Brake[i] > 0.15f)
             {
-                lf = Min2(lap.WheelSpeed[0], lap.WheelSpeed[1], i) < v * 0.85f ? lf + 1 : 0;
-                lr = Min2(lap.WheelSpeed[2], lap.WheelSpeed[3], i) < v * 0.85f ? lr + 1 : 0;
-                if (lf * lap.Step >= 4 && !m.LockupFront) { m.LockupFront = true; events.Add(new LapEvent { Type = "lockup-front", Dist = i * lap.Step, Corner = c.Name }); }
-                if (lr * lap.Step >= 4 && !m.LockupRear) { m.LockupRear = true; events.Add(new LapEvent { Type = "lockup-rear", Dist = i * lap.Step, Corner = c.Name }); }
+                lf = Min2(lap.WheelSpeed[0], lap.WheelSpeed[1], i) < v * 0.7f ? lf + 1 : 0;
+                lr = Min2(lap.WheelSpeed[2], lap.WheelSpeed[3], i) < v * 0.7f ? lr + 1 : 0;
+                if (lf >= lockRun && !m.LockupFront) { m.LockupFront = true; events.Add(new LapEvent { Type = "lockup-front", Dist = i * lap.Step, Corner = c.Name }); }
+                if (lr >= lockRun && !m.LockupRear) { m.LockupRear = true; events.Add(new LapEvent { Type = "lockup-rear", Dist = i * lap.Step, Corner = c.Name }); }
             }
             else { lf = 0; lr = 0; }
             if (lap.Throttle[i] > 0.3f && lap.WheelSpeed[2] != null)
             {
-                float rear = Math.Max(lap.WheelSpeed[2]![i], lap.WheelSpeed[3]![i]);
-                spin = rear > v * 1.08f + 0.5f ? spin + 1 : 0;
-                if (spin * lap.Step >= 6 && !m.Wheelspin) { m.Wheelspin = true; events.Add(new LapEvent { Type = "wheelspin", Dist = i * lap.Step, Corner = c.Name }); }
+                float rear = (lap.WheelSpeed[2]![i] + lap.WheelSpeed[3]![i]) / 2;
+                spin = rear > v * 1.1f + 0.5f ? spin + 1 : 0;
+                if (spin >= spinRun && !m.Wheelspin) { m.Wheelspin = true; events.Add(new LapEvent { Type = "wheelspin", Dist = i * lap.Step, Corner = c.Name }); }
             }
             else spin = 0;
         }

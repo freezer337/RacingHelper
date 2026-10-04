@@ -84,12 +84,15 @@ async function auto(el, params) {
             <div></div><div class="h">Slow</div><div class="h">Medium</div><div class="h">Fast</div>
             ${['entry', 'mid', 'exit'].map(p => `<div class="h">${p}</div>${['slow', 'medium', 'fast'].map(b => {
               const c = hd.cells.find(x => x.phase === p && x.speedBand === b);
-              if (!c || c.samples < 60) return `<div class="c dim small">little data</div>`;
-              return `<div class="c ${c.tendency}"><b>${c.tendency}</b><div class="tiny muted">US ${c.understeerRate.toFixed(0)}% · OS ${c.oversteerRate.toFixed(0)}%</div></div>`;
+              if (!c || c.samples < 60) return `<div class="c dim small">little data${c?.samples ? ` (${(c.samples / 60).toFixed(0)} s)` : ''}</div>`;
+              const bal = typeof c.balance === 'number' && isFinite(c.balance) ? c.balance : null;
+              const how = bal == null ? '' : bal >= 1 ? `needs ${bal.toFixed(0)}% more lock` : bal <= -1 ? `rotates ${(-bal).toFixed(0)}% more` : 'as normal';
+              return `<div class="c ${c.tendency}" title="At the limit: ${c.understeerRate.toFixed(0)}% of the time clearly understeering, ${c.oversteerRate.toFixed(0)}% clearly oversteering · ${(c.samples / 60).toFixed(0)} s of data"><b>${c.tendency}</b><div class="tiny muted">${how} · ${(c.samples / 60).toFixed(0)} s at the limit</div></div>`;
             }).join('')}`).join('')}</div>
             <ul class="steps" style="margin-top:12px">${hd.findings.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
-            ${hd.hotSpots.length ? `<div class="small muted">Hot spots: ${hd.hotSpots.map(h => `${esc(h.corner)} (${h.kind} on ${h.phase} ×${h.count})`).join(', ')}</div>` : ''}`
+            ${hd.hotSpots.length ? `<div class="small muted">Hot spots: ${hd.hotSpots.map(h => `${esc(h.corner)} (${h.kind} on ${h.phase}, ${h.count} laps)`).join(', ')}</div>` : ''}`
           : '<div class="muted">Not enough laps at the limit to judge the balance.</div>'}
+          <p class="small muted" style="margin:8px 0 0">How it's measured: how much steering the car needs at the limit compared with the same car at moderate cornering, in the same kind of corner and speed. Within ±10% is neutral.</p>
           <p class="small muted">Setup: ${esc(r.source)}</p>
         </div>
         <div class="card"><div class="card-head"><h2 class="grow">Suggested changes</h2></div>

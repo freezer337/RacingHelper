@@ -271,15 +271,15 @@ public static class SetupOptimiser
     public static List<SetupRequest> FromHandling(HandlingReport rep, string category)
     {
         var list = new List<SetupRequest>();
-        foreach (var c in rep.Cells.Where(c => c.Tendency != "neutral").OrderByDescending(c => Math.Max(c.UndersteerRate, c.OversteerRate)).Take(3))
+        foreach (var c in rep.Cells.Where(c => c.Tendency != "neutral").OrderByDescending(c => float.IsFinite(c.Balance) ? Math.Abs(c.Balance) : 0).Take(3))
         {
-            float rate = c.Tendency == "understeer" ? c.UndersteerRate : c.OversteerRate;
+            float size = float.IsFinite(c.Balance) ? Math.Abs(c.Balance) : 15;
             list.Add(new SetupRequest
             {
                 Symptom = c.Tendency,
                 Phase = c.Phase,
                 Speed = c.SpeedBand == "medium" ? "all" : c.SpeedBand,
-                Severity = rate > 20 ? 3 : rate > 10 ? 2 : 1,
+                Severity = size > 25 ? 3 : size > 15 ? 2 : 1,
                 Category = category,
             });
         }
