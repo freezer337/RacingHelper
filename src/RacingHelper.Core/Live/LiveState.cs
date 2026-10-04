@@ -121,9 +121,21 @@ public sealed class EngineerMessage
 {
     public DateTime At { get; set; } = DateTime.Now;
     public string Text { get; set; } = "";
-    public string Category { get; set; } = "info";      // info, lap, corner, fuel, flag, warning, pb, setup
+    public string Category { get; set; } = "info";      // info, lap, corner, fuel, flag, warning, pb, setup, tyres, coach, strategy
     public int Priority { get; set; } = 1;              // 0 low .. 3 critical
     public bool Speak { get; set; } = true;
+    public float LapDist { get; set; } = float.NaN;     // where it was said (m); with ValidUntil: drop it if it can't be heard before then
+    public float ValidUntil { get; set; } = float.NaN;  // lap distance (m) after which a coaching tip is useless
+}
+
+public sealed class TyreManagerLive
+{
+    public string State { get; set; } = "";             // cold / ok / hot-front / hot-rear / …
+    public float WarmPct { get; set; } = float.NaN;     // warm-up progress since leaving the pits (1 = up to temperature)
+    public float[] Load { get; set; } = { float.NaN, float.NaN, float.NaN, float.NaN }; // sliding over the last lap vs your normal (1 = normal) LF RF LR RR
+    public float FrontLoad { get; set; } = float.NaN;
+    public float RearLoad { get; set; } = float.NaN;
+    public bool HasBaseline { get; set; }
 }
 
 /// <summary>Immutable-by-convention snapshot of everything live, published ~20× per second.</summary>
@@ -205,6 +217,8 @@ public sealed class LiveState
     public LiveFuel? Fuel { get; set; }
     public float TankCapacity { get; set; }
     public List<TyreLive> Tyres { get; set; } = new();
+    public TyreManagerLive? TyreLoad { get; set; }
+    public string CoachTip { get; set; } = "";
     public WeatherLive Weather { get; set; } = new();
     public HealthLive Health { get; set; } = new();
 

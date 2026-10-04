@@ -19,6 +19,10 @@ public sealed class TelemetryHub : IDisposable
     public AnalysisService Analysis { get; }
     public RaceEngineer Engineer { get; }
     public SetupInstaller Setups { get; }
+    public TyreManager TyreManager { get; }
+    public DrivingCoach Coach { get; }
+    public CarManager CarManager { get; }
+    public CrewChiefBridge CrewChief { get; }
 
     volatile LiveState _state = new();
     public LiveState State => _state;
@@ -74,6 +78,8 @@ public sealed class TelemetryHub : IDisposable
     bool _refWet;
     double _historyFuelPerLap = double.NaN;
     float _lapFuelStart = float.NaN, _lapStartPct;
+    double _prevFrameTime = double.NaN;
+    PitStopInfo? _lastStop;
 
     // input history ring buffers (~30 Hz, 6 s)
     const int Hist = 180;
@@ -107,6 +113,11 @@ public sealed class TelemetryHub : IDisposable
         Analysis = analysis;
         Engineer = new RaceEngineer(() => Settings.Current);
         Setups = new SetupInstaller(() => Settings.Current);
+        TyreManager = new TyreManager(Engineer, () => Settings.Current);
+        Coach = new DrivingCoach(Engineer, () => Settings.Current);
+        CarManager = new CarManager(Engineer, () => Settings.Current);
+        CrewChief = new CrewChiefBridge(() => Settings.Current);
+        CrewChief.Log += m => Engineer.Info(m);
         _source = _live;
         Analysis.MyDriverIdProvider = () => Settings.Current.MyUserId;
 
@@ -120,6 +131,7 @@ public sealed class TelemetryHub : IDisposable
 
     public void Start()
     {
+        _ = CrewChief.StartAsync();
         _thread = new Thread(Loop) { IsBackground = true, Name = "telemetry", Priority = ThreadPriority.AboveNormal };
         _thread.Start();
         _worker = new Thread(() =>
@@ -214,7 +226,11 @@ public sealed class TelemetryHub : IDisposable
 
             try
             {
+                double dt = double.IsFinite(_prevFrameTime) ? f.SessionTime - _prevFrameTime : 0;
+                _prevFrameTime = f.SessionTime;
                 _tracker.Process(f, _source.WallClock);
+                TyreManager.Update(f, _info.TrackLengthM, dt, f.SessionTime);
+                CarManager.Update(f);
                 UpdateLiveLap(f);
                 UpdateTrail(f);
                 Watch(f);
@@ -233,6 +249,7 @@ public sealed class TelemetryHub : IDisposable
         bool carTrackChanged = _info == null || _info.CarPath != si.CarPath || _info.TrackKey != si.TrackKey;
         _info = si;
         _tracker.OnSessionInfo(si);
+        CarManager.OnSessionInfo(si);
         _sectorStarts = SectorStarts(si);
         if (carTrackChanged)
         {
@@ -314,6 +331,9 @@ public sealed class TelemetryHub : IDisposable
     void OnSessionStarted(SessionContext ctx)
     {
         ResetSessionState();
+        TyreManager.OnSession(ctx.Info, ctx.SessionType);
+        Coach.Reset(ctx.SessionType);
+        CarManager.Reset(ctx.Info, ctx.SessionType);
         var row = SessionStore.ToRow(ctx, _source.IsLive ? "live" : "ibt");
         Enqueue(() => Store.EnsureSession(ctx, row.Source, _source is IbtSource ibt ? ibt.File.Path : ""));
     }
@@ -336,6 +356,9 @@ public sealed class TelemetryHub : IDisposable
     {
         var si = ctx.Info;
         var f = _source.Frame;
+        var stop = _lastStop;
+        _lastStop = null;
+        TyreManager.OnStintStart(stop?.StationaryTime ?? double.NaN, stop == null || stop.TyresChanged);
         if (_source.IsLive && Settings.Current.AutoStartDiskTelemetry && f.HasDiskLoggingVar && !f.DiskLoggingEnabled && !_diskLoggingRequested)
         {
             _diskLoggingRequested = true;
@@ -424,6 +447,7 @@ public sealed class TelemetryHub : IDisposable
                         var cl = ToLive(cc, la.Corners.FirstOrDefault(x => x.Corner == cc.Corner), lap.LapNumber);
                         _lapCorners.Add(cl);
                         _lastCorner = cl;
+                        Coach.OnCorner(cc, lap.LapNumber);
                     }
                 UpdateBestSectors(dl, lap.Valid);
             }
@@ -454,6 +478,10 @@ public sealed class TelemetryHub : IDisposable
         var fuel = ComputeFuel(_source.Frame);
         if (fuel != null) Engineer.Fuel(fuel, isRace, ctx.Laps.Count);
 
+        var fr = _source.Frame;
+        TyreManager.OnLap(lap, _sessionBest);
+        CarManager.OnLap(lap, model, lap.SetupHash, fr.SessionTimeRemain, fr.SessionLapsRemainEx);
+
         // damage heuristic: pace after an incident
         if (_incidentLapWatch >= 0 && lap.LapNumber > _incidentLapWatch && lap.Valid)
         {
@@ -472,6 +500,7 @@ public sealed class TelemetryHub : IDisposable
 
     void OnPitStop(SessionContext ctx, PitStopInfo p)
     {
+        _lastStop = p;
         Enqueue(() => Store.Db.InsertPitStop(Store.EnsureSession(ctx, _source.IsLive ? "live" : "ibt"), p));
         if (p.FuelAdded > 0.5f || p.TyresChanged) Engineer.PitStop(new PitStopSummary(p.StationaryTime, p.FuelAdded, p.TyresChanged));
     }
@@ -564,7 +593,9 @@ public sealed class TelemetryHub : IDisposable
             _lapCorners.Add(cl);
             _lastCorner = cl;
             Engineer.CornerDone(cl);
+            Coach.OnCorner(cc, f.Lap);
         }
+        if (reference != null) Coach.Update(f, d, model, reference);
     }
 
     void UpdateTrail(Frame f)
@@ -790,6 +821,8 @@ public sealed class TelemetryHub : IDisposable
             CarLeftRight = f.CarLeftRight,
             TrackModelVersion = model == null ? 0 : (int)(model.SourceLapId % 1_000_000_000) + 1,
             Messages = Engineer.Recent(),
+            TyreLoad = TyreManager.Snapshot(),
+            CoachTip = Coach.LastTip,
         };
 
         if (_tracker.LapInProgress)
@@ -1085,5 +1118,6 @@ public sealed class TelemetryHub : IDisposable
         try { _tracker.Flush(); } catch { }
         _source.Dispose();
         _live.Dispose();
+        CrewChief.Dispose();
     }
 }

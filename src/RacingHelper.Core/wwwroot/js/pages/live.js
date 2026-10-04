@@ -106,13 +106,13 @@ function renderLiveShell(el) {
             </div>
           </div>
         </div>
-        <div class="card"><div class="card-head"><h3 class="grow">Corner feedback · this lap</h3><span class="small muted" id="lastcorner"></span></div><div id="corners"></div></div>
+        <div class="card"><div class="card-head"><h3 class="grow">Corner feedback · this lap</h3><span class="small muted" id="lastcorner"></span></div><div class="small" id="coachtip" style="margin-bottom:8px"></div><div id="corners"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Race engineer</h3></div><div class="feed" id="feed"></div></div>
       </div>
       <div class="grid" style="align-content:start">
         <div class="card tight"><canvas id="livemap" class="map-canvas"></canvas></div>
         <div class="card"><div class="card-head"><h3 class="grow">Fuel</h3><a href="#/fuel" class="small">Planner →</a></div><div id="fuel"></div></div>
-        <div class="card"><div class="card-head"><h3 class="grow">Tyres</h3><a href="#/tyres" class="small">Tyre tool →</a></div><div id="tyres"></div></div>
+        <div class="card"><div class="card-head"><h3 class="grow">Tyres</h3><a href="#/tyres" class="small">Tyre tool →</a></div><div id="tyreload"></div><div id="tyres"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Conditions & car</h3></div><div id="wx"></div></div>
       </div>
     </div>`;
@@ -169,6 +169,8 @@ function update(el, s) {
     : `<div class="muted small">${s.referenceLabel ? 'Feedback appears after each corner on a flying lap.' : 'Complete a clean lap to set a reference.'}</div>`;
 
   $('#feed', el).innerHTML = feedHtml(s.messages);
+  $('#coachtip', el).innerHTML = s.coachTip ? `<span class="muted">Coach:</span> ${esc(s.coachTip)}` : '';
+  $('#tyreload', el).innerHTML = tyreLoadHtml(s.tyreLoad);
 
   const f = s.fuel;
   $('#fuel', el).innerHTML = f ? `<div class="stats">
@@ -192,6 +194,25 @@ function update(el, s) {
     ${hl.warnings.length ? `<span class="k">Warnings</span><span class="bad">${esc(hl.warnings.join(', '))}</span>` : ''}
   </div>`;
   drawMap(s);
+}
+
+const LOAD_STATE = {
+  cold: ['Cold — building temperature', 'blue'], ok: ['Tyres OK — push', 'good'], learning: ['Learning your normal tyre load (3 clean laps)', 'muted'],
+  'hot-front': ['Fronts overheating — cool them', 'bad'], 'hot-rear': ['Rears overheating — cool them', 'bad'], hot: ['All four overheating — back off', 'bad'],
+};
+
+function tyreLoadHtml(t) {
+  if (!t || !t.state) return '';
+  const [label, cls] = LOAD_STATE[t.state] || [t.state, 'muted'];
+  const warm = t.state === 'cold' && isNum(t.warmPct) ? ` · ${(t.warmPct * 100).toFixed(0)}%` : '';
+  const cell = (n, v) => {
+    const pct = isNum(v) ? Math.round(v * 100) : null;
+    const c = pct == null ? 'var(--panel3)' : v >= 1.2 ? 'var(--red)' : v >= 1.08 ? '#F5B942' : 'var(--accent)';
+    return `<div style="flex:1;text-align:center"><div class="tiny muted">${n}</div><div class="num" style="border-bottom:3px solid ${c}">${pct == null ? '–' : pct + '%'}</div></div>`;
+  };
+  return `<div class="${cls}" style="font-weight:600">${label}${warm}</div>
+    ${t.hasBaseline ? `<div class="row" style="gap:6px;margin:6px 0 10px">${['LF', 'RF', 'LR', 'RR'].map((n, i) => cell(n, t.load[i])).join('')}</div>
+    <div class="tiny muted" style="margin-bottom:10px">Sliding over the last lap vs your normal clean laps here (100% = normal).</div>` : '<div style="height:8px"></div>'}`;
 }
 
 function tempColor(v, status) {

@@ -122,7 +122,23 @@ public sealed class WebServer : IAsyncDisposable
         });
         app.MapGet("/api/track/current", () => J(_hub.Model));
         app.MapGet("/api/engineer", () => J(_hub.Engineer.Recent(50)));
-        app.MapPost("/api/engineer/test", () => { _app.Speak("Radio check. Racing Helper, loud and clear."); return J(new { ok = true }); });
+        app.MapPost("/api/engineer/test", () =>
+        {
+            const string text = "Radio check. Racing Helper, loud and clear.";
+            if (_hub.CrewChief.UseCrewChief) _hub.CrewChief.Send(text, 2); else _app.Speak(text);
+            return J(new { ok = true, via = _hub.CrewChief.UseCrewChief ? "crewchief" : "windows" });
+        });
+        app.MapGet("/api/crewchief", () => J(_hub.CrewChief.Describe()));
+        app.MapPost("/api/crewchief/configure", () =>
+        {
+            var (ok, message) = _hub.CrewChief.ConfigureCrewChief();
+            return J(new { ok, message });
+        });
+        app.MapPost("/api/crewchief/restart", async () =>
+        {
+            await _hub.CrewChief.RestartAsync();
+            return J(_hub.CrewChief.Describe());
+        });
         app.MapGet("/api/voices", () => J(_app.Voices()));
 
         // ---------------- sessions & laps ----------------
@@ -321,7 +337,9 @@ public sealed class WebServer : IAsyncDisposable
             if (incoming == null) return Results.BadRequest();
             incoming.Overlays = S.Overlays; // overlays have their own endpoint
             incoming.TyreTargets = S.TyreTargets;
+            bool restartCrewChief = incoming.CrewChiefEnabled != S.CrewChiefEnabled || incoming.CrewChiefPort != S.CrewChiefPort;
             _hub.Settings.Replace(incoming);
+            if (restartCrewChief) await _hub.CrewChief.RestartAsync();
             return J(new { ok = true });
         });
         app.MapGet("/api/overlays", () => J(new

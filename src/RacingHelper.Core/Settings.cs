@@ -42,6 +42,17 @@ public sealed class AppSettings
     public int VoiceVolume { get; set; } = 100;
     public string VoiceName { get; set; } = "";
     public bool CornerCallouts { get; set; }                // speak after each corner where time was lost
+    public string VoiceOutput { get; set; } = "auto";       // auto (CrewChief when connected, else Windows) | windows | crewchief
+
+    // CrewChief V4: we host a local MQTT broker; CrewChief connects to it and speaks our messages
+    public bool CrewChiefEnabled { get; set; } = true;
+    public int CrewChiefPort { get; set; } = 1883;
+    public bool CrewChiefSkipDuplicates { get; set; } = true; // don't send what CrewChief already says itself (flags, fuel, lap times…)
+
+    // car management while driving
+    public bool TyreManager { get; set; } = true;           // cold / overheating / push calls from live sliding energy
+    public string CoachingMode { get; set; } = "practice";  // practice | always | off — corner tips before the corner
+    public bool LiveSetupAdvice { get; set; } = true;       // practice: setup suggestions from your driving, at the pit stop
 
     // automation
     public bool AutoImportIbt { get; set; } = true;

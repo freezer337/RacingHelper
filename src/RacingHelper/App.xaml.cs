@@ -72,7 +72,9 @@ public partial class App : Application
             Voice = new Voice(() => Settings.Current);
             Hub.Engineer.Said += m =>
             {
-                if (m.Speak && Settings.Current.VoiceEnabled) Voice.Say(m.Text, m.Priority);
+                if (!m.Speak || !Settings.Current.VoiceEnabled) return;
+                if (Hub.CrewChief.TryHandle(m)) return;   // CrewChief connected → it speaks (or already says this itself)
+                Voice.Say(m.Text, m.Priority);
             };
 
             Hub.Start();
