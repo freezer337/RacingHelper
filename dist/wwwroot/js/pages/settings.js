@@ -44,7 +44,7 @@ export async function render(root) {
           </ol>
         </div>
       </div>
-      <div class="card span2"><h2 style="margin-bottom:6px">Wheel buttons & questions</h2>
+      <div class="card span2"><h2 style="margin-bottom:6px">Buttons & keys</h2>
         <p class="small muted" style="margin:0 0 12px">Ask the engineer while you drive. Click <b>Bind</b>, then press a button on your wheel or button box (Moza, Fanatec, Simucube… any controller Windows sees). The answer comes straight away, even mid-corner, because you asked for it.${controls?.controllers?.length ? ` Controllers seen so far: ${controls.controllers.map(esc).join(', ')}.` : ''}</p>
         <div id="controls">${controlsHtml(controls)}</div>
       </div>
@@ -111,6 +111,16 @@ export async function render(root) {
     const id = b.dataset.id;
     if (b.dataset.act === 'ask') { const r = await api('/api/ask/' + id, { body: {} }); toast(r.answer || 'Done'); }
     if (b.dataset.act === 'clear') await api('/api/controls/clear', { body: { action: id } });
+    if (b.dataset.act === 'keyclear') await api('/api/controls/key', { body: { action: id, keys: '' } });
+    if (b.dataset.act === 'keysreset') await api('/api/controls/keys-reset', { body: {} });
+    if (b.dataset.act === 'key') {
+      b.textContent = 'Press keys… (Esc cancels)'; b.classList.add('primary');
+      const keys = await captureKeys();
+      if (keys) {
+        const r = await api('/api/controls/key', { body: { action: id, keys } }).catch(() => ({ ok: false, error: 'Failed' }));
+        toast(r.ok ? `${keys} set` : r.error);
+      }
+    }
     if (b.dataset.act === 'bind') {
       b.textContent = 'Press a button…'; b.disabled = true;
       const r = await api('/api/controls/learn', { body: { action: id } }).catch(() => ({ ok: false, error: 'Failed' }));
@@ -163,16 +173,49 @@ function ccStatus(cc) {
   return `<div>${line}</div><div class="small muted" style="margin-top:4px">${cfg}</div>`;
 }
 
+// Waits for one key combination in the dashboard and returns it like "Ctrl+Shift+F5" (null on Esc / timeout).
+function captureKeys() {
+  return new Promise(resolve => {
+    const done = v => { window.removeEventListener('keydown', onKey, true); clearTimeout(t); resolve(v); };
+    const t = setTimeout(() => done(null), 15000);
+    function onKey(e) {
+      e.preventDefault(); e.stopPropagation();
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;   // wait for the real key
+      if (e.key === 'Escape') return done(null);
+      const name = keyName(e.code);
+      if (!name) return toast("That key can't be used, pick another.");
+      done([e.ctrlKey && 'Ctrl', e.shiftKey && 'Shift', e.altKey && 'Alt', name].filter(Boolean).join('+'));
+    }
+    window.addEventListener('keydown', onKey, true);
+  });
+}
+
+// browser key code → Windows key name
+function keyName(code) {
+  let m;
+  if ((m = code.match(/^Key([A-Z])$/))) return m[1];
+  if ((m = code.match(/^Digit(\d)$/))) return 'D' + m[1];
+  if ((m = code.match(/^F(\d{1,2})$/))) return 'F' + m[1];
+  if ((m = code.match(/^Numpad(\d)$/))) return 'NumPad' + m[1];
+  return { NumpadAdd: 'Add', NumpadSubtract: 'Subtract', NumpadMultiply: 'Multiply', NumpadDivide: 'Divide', NumpadDecimal: 'Decimal',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Insert: 'Insert', Delete: 'Delete', Home: 'Home', End: 'End',
+    PageUp: 'PageUp', PageDown: 'PageDown', Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backquote: 'Oemtilde', Minus: 'OemMinus', Equal: 'Oemplus',
+    BracketLeft: 'OemOpenBrackets', BracketRight: 'OemCloseBrackets', Semicolon: 'OemSemicolon', Quote: 'OemQuotes', Comma: 'Oemcomma', Period: 'OemPeriod',
+    Slash: 'OemQuestion', Backslash: 'OemPipe', Pause: 'Pause', ScrollLock: 'Scroll' }[code] || null;
+}
+
 function controlsHtml(c) {
   if (!c) return '<span class="muted small">Unavailable.</span>';
   const bound = id => c.bindings.find(b => b.action === id);
-  return `<table><tr><th>Question</th><th>Wheel button</th><th>Keyboard</th><th></th></tr>
+  return `<table><tr><th>Action</th><th>Wheel button</th><th>Keyboard</th><th></th></tr>
     ${c.questions.map(q => {
       const b = bound(q.id);
       return `<tr><td>${esc(q.label)}</td>
         <td>${b ? `<b>${esc(b.deviceName || b.device)}</b> · button ${b.button}` : '<span class="dim">—</span>'}</td>
-        <td class="small">${q.hotkey ? `<kbd>${esc(q.hotkey).replaceAll('+', '</kbd>+<kbd>')}</kbd>` : ''}</td>
-        <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="small" data-act="bind" data-id="${q.id}">Bind</button>${b ? `<button class="small" data-act="clear" data-id="${q.id}">Clear</button>` : ''}<button class="small" data-act="ask" data-id="${q.id}">Ask now</button></div></td></tr>`;
+        <td class="small"><div class="row" style="gap:6px">${q.hotkey ? `<kbd>${esc(q.hotkey).replaceAll('+', '</kbd>+<kbd>')}</kbd>` : '<span class="dim">—</span>'}<button class="small" data-act="key" data-id="${q.id}">Set key</button>${q.hotkey ? `<button class="small" data-act="keyclear" data-id="${q.id}">×</button>` : ''}</div></td>
+        <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="small" data-act="bind" data-id="${q.id}">Bind wheel</button>${b ? `<button class="small" data-act="clear" data-id="${q.id}">Clear</button>` : ''}${q.app ? '' : `<button class="small" data-act="ask" data-id="${q.id}">Ask now</button>`}</div></td></tr>`;
     }).join('')}</table>
+    ${c.keyErrors?.length ? `<p class="small bad" style="margin:8px 0 0">Couldn't register: ${c.keyErrors.map(esc).join(', ')}</p>` : ''}
+    <p class="small muted" style="margin:8px 0 0">Keyboard shortcuts work while iRacing is in front. Avoid keys iRacing itself uses (plain F1–F12, letters): combinations like Ctrl+Shift+… or F13–F24 are safest. <button class="small" data-act="keysreset">Reset keys to defaults</button></p>
     ${c.quiet ? '<p class="small warn" style="margin:8px 0 0">Quiet mode is on: only important calls.</p>' : ''}`;
 }

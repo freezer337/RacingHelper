@@ -22,6 +22,23 @@ public sealed class Hotkeys : IDisposable
         _src.AddHook(Hook);
     }
 
+    /// <summary>Parses "Ctrl+Shift+F5", "F13", "Alt+NumPad7", "Ctrl+K" into RegisterHotKey modifiers and a virtual-key code.</summary>
+    public static bool TryParse(string spec, out uint mods, out uint vk)
+    {
+        mods = 0; vk = 0;
+        foreach (var raw in spec.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string p = raw.ToLowerInvariant();
+            if (p is "ctrl" or "control") { mods |= Ctrl; continue; }
+            if (p is "shift") { mods |= Shift; continue; }
+            if (p is "alt") { mods |= Alt; continue; }
+            string name = p.Length == 1 && char.IsDigit(p[0]) ? "D" + p : raw;
+            if (!Enum.TryParse<System.Windows.Forms.Keys>(name, true, out var key) || key == System.Windows.Forms.Keys.None) return false;
+            vk = (uint)key;
+        }
+        return vk != 0;
+    }
+
     /// <param name="vk">Win32 virtual-key code (e.g. <see cref="F9"/>).</param>
     public bool Register(int id, uint modifiers, uint vk, Action action)
     {

@@ -33,5 +33,7 @@ public sealed class AppBridge : IAppBridge
         return await task;
     }
 
+    public IReadOnlyList<string> ApplyHotkeys() => _app.Dispatcher.Invoke(() => _app.ApplyHotkeys());
+
     public IReadOnlyList<string> Controllers() => _app.Wheel == null ? Array.Empty<string>() : _app.Dispatcher.Invoke(() => _app.Wheel.Controllers());
 }

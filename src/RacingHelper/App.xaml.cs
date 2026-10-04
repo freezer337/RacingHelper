@@ -87,17 +87,7 @@ public partial class App : Application
             Overlays = new OverlayManager(Hub, Settings);
             Overlays.Start();
 
-            _hotkeys = new Hotkeys();
-            // Ctrl+Shift+F9..F12: free in browsers and iRacing (letters would steal e.g. Ctrl+Shift+R from every app)
-            _hotkeys.Register(HotkeyIds.ToggleEdit, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F9, () => Overlays.EditMode = !Overlays.EditMode);
-            _hotkeys.Register(HotkeyIds.ToggleOverlays, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F10, () => Overlays.Hidden = !Overlays.Hidden);
-            _hotkeys.Register(HotkeyIds.CycleReference, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F11, CycleReference);
-            _hotkeys.Register(HotkeyIds.Dashboard, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F12, ShowDashboard);
-            // questions to the engineer (wheel buttons can be bound to any question in Settings)
-            _hotkeys.Register(HotkeyIds.AskTyres, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F5, () => AskAsync("tyres"));
-            _hotkeys.Register(HotkeyIds.AskFuel, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F6, () => AskAsync("fuel"));
-            _hotkeys.Register(HotkeyIds.AskGaps, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F7, () => AskAsync("gaps"));
-            _hotkeys.Register(HotkeyIds.Repeat, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F8, () => AskAsync("repeat"));
+            ApplyHotkeys();
 
             try
             {
@@ -105,7 +95,7 @@ public partial class App : Application
                 Wheel.Pressed += p =>
                 {
                     var b = Settings.Current.ButtonBindings.FirstOrDefault(x => x.Device == p.Device && x.Button == p.Button);
-                    if (b != null) AskAsync(b.Action);
+                    if (b != null) RunAction(b.Action);
                 };
             }
             catch (Exception ex) { Log("Wheel buttons unavailable: " + ex.Message); }
@@ -143,6 +133,35 @@ public partial class App : Application
     }
 
     void AskAsync(string question) => Task.Run(() => Hub.Ask(question));
+
+    /// <summary>Runs a bound action (keyboard shortcut or wheel button): app actions here, everything else is a question.</summary>
+    public void RunAction(string id)
+    {
+        switch (id)
+        {
+            case "overlays-edit": Overlays.EditMode = !Overlays.EditMode; break;
+            case "overlays-toggle": Overlays.Hidden = !Overlays.Hidden; break;
+            case "reference": CycleReference(); break;
+            case "dashboard": ShowDashboard(); break;
+            default: AskAsync(id); break;
+        }
+    }
+
+    /// <summary>(Re)registers the keyboard shortcuts from settings. Returns the ones that couldn't be registered.</summary>
+    public IReadOnlyList<string> ApplyHotkeys()
+    {
+        _hotkeys?.Dispose();
+        _hotkeys = new Hotkeys();
+        var failed = new List<string>();
+        int id = 1;
+        foreach (var k in Settings.Current.EffectiveKeys().Where(k => !string.IsNullOrWhiteSpace(k.Keys)))
+        {
+            string action = k.Action;
+            if (!Hotkeys.TryParse(k.Keys, out uint mods, out uint vk)) { failed.Add($"{k.Keys} (unknown key)"); continue; }
+            if (!_hotkeys.Register(id++, mods, vk, () => RunAction(action))) failed.Add($"{k.Keys} (in use by another program)");
+        }
+        return failed;
+    }
 
     void CycleReference()
     {
@@ -194,7 +213,3 @@ public partial class App : Application
     }
 }
 
-static class HotkeyIds
-{
-    public const int ToggleEdit = 1, ToggleOverlays = 2, CycleReference = 3, Dashboard = 4, AskTyres = 5, AskFuel = 6, AskGaps = 7, Repeat = 8;
-}

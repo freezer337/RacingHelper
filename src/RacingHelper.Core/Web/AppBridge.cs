@@ -16,6 +16,8 @@ public interface IAppBridge
     /// <summary>Waits for the next button press on any wheel / button box (null on timeout or if unsupported).</summary>
     Task<ButtonPress?> LearnButton(int timeoutMs);
     IReadOnlyList<string> Controllers();
+    /// <summary>(Re)registers the keyboard shortcuts from settings; returns the ones Windows refused (already in use / unknown key).</summary>
+    IReadOnlyList<string> ApplyHotkeys();
 }
 
 public static class OverlayCatalog

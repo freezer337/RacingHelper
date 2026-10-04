@@ -88,6 +88,8 @@ public sealed class TelemetryHub : IDisposable
     float _lapFuelStart = float.NaN, _lapStartPct;
     double _prevFrameTime = double.NaN;
     int _lastPosition, _lastIncidents;
+    string _pitPlanText = "";
+    DateTime _pitPlanAt = DateTime.MinValue;
     bool _notesAnnounced;
     List<string> _sheetLines = new();
     DateTime _sheetAt = DateTime.MinValue;
@@ -362,7 +364,8 @@ public sealed class TelemetryHub : IDisposable
         {
             var n = Notes.Get(si.CarPath, si.TrackKey);
             foreach (var (key, preset, now) in CarNotesStore.PresetDiff(n, si)) lines.Add($"Set {CarNotesStore.Label(key)} to {preset} (now {now})");
-            foreach (var t in n.Todo) lines.Add($"Try: fix {t.Symptom} {(t.Phase == "all" ? "" : "on " + t.Phase)} ({t.Reason})");
+            if (!si.IsFixedSetup)   // nothing to change in a fixed setup
+                foreach (var t in n.Todo) lines.Add($"Try: fix {t.Symptom} {(t.Phase == "all" ? "" : "on " + t.Phase)} ({t.Reason})");
         }
         _sheetLines = lines;
         return lines;
@@ -1133,6 +1136,7 @@ public sealed class TelemetryHub : IDisposable
         {
             _lastSlow = DateTime.Now;
             ComputeField(f, si);
+            if ((DateTime.Now - _pitPlanAt).TotalSeconds > 1) { _pitPlanAt = DateTime.Now; _pitPlanText = Pit.Describe(f, ComputeFuel(f)); }
             _weatherLive = BuildWeather(f);
         }
 
@@ -1183,6 +1187,8 @@ public sealed class TelemetryHub : IDisposable
             SetupInstruction = SetupEngineer.Instruction,
             QuietMode = Radio.Quiet,
             LastCrash = Crash.Last?.Summary ?? "",
+            CarAdvice = InCarAdvisor.Current.Count > 0 ? "Car adjustments: " + InCarAdjustments.Join(InCarAdvisor.Current) : "",
+            PitPlan = _pitPlanText,
             SetupSheet = SheetLines(),
             InCarValues = new Dictionary<string, float>(f.Dc),
         };

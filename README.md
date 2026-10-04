@@ -33,7 +33,9 @@ Closing the dashboard window keeps the app running in the tray, so recording, ov
 | `Ctrl+Shift+F10` | Hide / show all overlays |
 | `Ctrl+Shift+F11` | Switch delta reference: PB → session best → last lap |
 | `Ctrl+Shift+F12` | Open the dashboard |
-| `Ctrl+Shift+F5` / `F6` / `F7` / `F8` | Ask: tyres / fuel / gaps / repeat the last message (any question can also go on a wheel button) |
+| `Ctrl+Shift+F5` / `F6` / `F7` / `F8` | Ask: tyres / fuel / gaps / repeat the last message |
+
+These are the defaults: change any of them, or add your own, in Settings → Buttons & keys. The version number is at the bottom of the dashboard's sidebar.
 
 The dashboard also runs at http://127.0.0.1:5199. Enable LAN access in Settings to open it on a tablet next to the rig.
 
@@ -111,6 +113,29 @@ Verbosity is set in Settings.
 - **Every pit stop:** iRacing's crew measures the tyres in the box. Those readings become a short report with camber and pressure advice (inside/outside spread, middle vs edges, front vs rear balance).
 - **Qualifying:** "Time for one more lap after this one" / "This is your last lap. Make it count."
 - **Only talks on straights.** Messages wait until you're not braking or cornering and there's room to finish the sentence before the next braking point. Urgent calls, corner tips (already timed before the braking point) and answers to your own questions go out straight away. Old low-priority chatter is dropped rather than read out late.
+
+### VR: the setup panel in your cockpit (OpenKneeboard)
+
+Racing Helper serves a VR panel at `http://127.0.0.1:5199/kneeboard.html`. It's built for [OpenKneeboard](https://openkneeboard.com), which shows it inside iRacing. You can place it, rotate it, resize it and show/hide it with a button, and OpenKneeboard remembers where you put it.
+
+The panel shows:
+- **Change on the car:** the setup session's instruction, the in-car adjustments it suggests, and preset values your setup is missing
+- the setup session progress
+- tyre state and load per tyre, with the cool-down estimate
+- fuel and what the pit service will set
+- the last incident and why it happened
+- the latest engineer calls
+
+Setup (once):
+1. Install OpenKneeboard.
+2. Run iRacing in **OpenXR** mode, not the legacy Oculus mode; OpenKneeboard can't draw into that. With a Meta headset: in the Meta Quest Link app → Settings → General, set it as the active OpenXR runtime, then choose OpenXR in iRacing's VR settings.
+3. In OpenKneeboard → Tabs → add a **Web Dashboard** tab with the address `http://127.0.0.1:5199/kneeboard.html`.
+4. In OpenKneeboard → VR, set the position, angle and size. Under Input, bind a wheel button to show/hide it.
+5. If it doesn't appear in iRacing, set `DepthLayerExtensionEnabled=0` in iRacing's ini file (see OpenKneeboard's known issues for iRacing).
+
+### Your own keys and buttons
+
+In **Settings → Buttons & keys** every action can have your own keyboard shortcut (**Set key**, then press the combination) and a wheel/button-box button (**Bind wheel**, then press the button). That includes the questions, moving/hiding the overlays, switching the delta reference and opening the dashboard. If Windows says another program already uses a key, you're told to pick another.
 
 ### Ask the engineer from your wheel
 
