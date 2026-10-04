@@ -24,6 +24,7 @@ export async function render(root) {
           ${chk('tyreManager', s.tyreManager, 'Tyre management: tell me when tyres are cold, overheating (cool them) and when I can push again')}
           <label class="field">Corner coaching <span class="dim">(a short tip before a corner where you keep losing time)</span>${sel('coachingMode', [['practice', 'In practice only'], ['always', 'Practice, qualifying and race'], ['off', 'Off']], s.coachingMode)}</label>
           ${chk('hotspotWarnings', s.hotspotWarnings, "Warn me before a corner where I've gone off twice this session")}
+          ${chk('inCarAdvice', s.inCarAdvice, 'Tell me which in-car adjustments to make, all in one sentence ("increase TC by 1, and move brake bias back 0.5"). You make the change.')}
           ${chk('liveSetupAdvice', s.liveSetupAdvice, 'Practice: start a guided setup session automatically (drive a run, change one thing, compare)')}
           <label class="field">Clean laps per setup run<input type="number" min="3" max="10" id="setupRunLaps" value="${s.setupRunLaps}"></label>
           <p class="small muted" style="margin:0">Every pit stop: the crew's tyre temperature readings are turned into camber and pressure advice. Qualifying: you're told when there's time for another lap.</p>
@@ -47,13 +48,17 @@ export async function render(root) {
         <p class="small muted" style="margin:0 0 12px">Ask the engineer while you drive. Click <b>Bind</b>, then press a button on your wheel or button box (Moza, Fanatec, Simucube… any controller Windows sees). The answer comes straight away, even mid-corner, because you asked for it.${controls?.controllers?.length ? ` Controllers seen so far: ${controls.controllers.map(esc).join(', ')}.` : ''}</p>
         <div id="controls">${controlsHtml(controls)}</div>
       </div>
-      <div class="card span2"><h2 style="margin-bottom:6px">In-car adjustments by the engineer</h2>
-        <p class="small muted" style="margin:0 0 10px">iRacing only lets apps change pit service (fuel, tyres, pressures, fast repair), not the garage setup or the wing. What the app <i>can</i> do is press the keys you've bound in iRacing for in-car adjustments. The setup session then makes its brake bias / TC / ABS / in-car anti-roll bar suggestion for you when you press <b>Apply</b> (a wheel button or the Live page). It reads the value back after every press, so it stops on target.</p>
-        ${chk('inCarAutomation', s.inCarAutomation, 'Let the engineer make in-car changes when I press Apply (only then, never on its own)')}
-        <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin-top:10px">
-          ${INCAR.map(([id, label]) => `<label class="field">${label} up<input data-key="${id}+" placeholder="e.g. F13" value="${esc(s.inCarKeys?.[id + '+'] || '')}"></label><label class="field">${label} down<input data-key="${id}-" placeholder="e.g. F14" value="${esc(s.inCarKeys?.[id + '-'] || '')}"></label>`).join('')}
+      <div class="card"><h2 style="margin-bottom:6px">Automatic pit service</h2>
+        <p class="small muted" style="margin:0 0 12px">When you enter pit road, Racing Helper fills in iRacing's pit menu for you, using iRacing's own pit commands, then tells you what it set. The garage setup (wing, springs…) can't be changed at a stop.</p>
+        <div class="grid" style="gap:10px">
+          <label class="field">Use it${sel('autoPit', [['race', 'In races'], ['always', 'In every session'], ['off', 'Off']], s.autoPit)}</label>
+          ${chk('autoPitFuel', s.autoPitFuel, 'Fuel: exactly what I need to finish (plus the safety margin)')}
+          <label class="field">Tyres${sel('autoPitTyres', [['auto', 'Change them if enough laps are left'], ['always', 'Always change'], ['never', 'Never change'], ['manual', "Don't touch the tyre boxes"]], s.autoPitTyres)}</label>
+          <label class="field">"Enough laps left" means at least<input type="number" min="1" max="50" id="autoPitTyreMinLaps" value="${s.autoPitTyreMinLaps}"></label>
+          ${chk('autoPitPressures', s.autoPitPressures, 'New tyres get the cold pressures my last run here says I need')}
+          ${chk('autoPitFastRepair', s.autoPitFastRepair, 'Fast repair when there is damage')}
+          ${chk('autoPitWindscreen', s.autoPitWindscreen, 'Windscreen tear-off')}
         </div>
-        <p class="small muted" style="margin:10px 0 0">In iRacing: Options → Controls → bind a <b>keyboard key</b> to each one you use (e.g. "Traction control +"), then type the same key here: <span class="num">F13</span>, <span class="num">NumPad7</span>, <span class="num">T</span> or <span class="num">Ctrl+Shift+T</span>. Keys nobody types while driving (F13–F24, numpad) work best. iRacing has to be the active window.</p>
       </div>
       <div class="card"><h2 style="margin-bottom:12px">Delta & analysis</h2>
         <div class="grid" style="gap:12px">
@@ -126,9 +131,9 @@ export async function render(root) {
       ...s,
       voiceEnabled: v('voiceEnabled').checked, voiceVerbosity: v('voiceVerbosity').value, cornerCallouts: v('cornerCallouts').checked,
       voiceOutput: v('voiceOutput').value, tyreManager: v('tyreManager').checked, coachingMode: v('coachingMode').value, liveSetupAdvice: v('liveSetupAdvice').checked,
-      inCarAutomation: v('inCarAutomation').checked,
-      inCarKeys: Object.fromEntries([...root.querySelectorAll('input[data-key]')].map(i => [i.dataset.key, i.value.trim()]).filter(([, k]) => k)),
-      quietInCorners: v('quietInCorners').checked, hotspotWarnings: v('hotspotWarnings').checked, setupRunLaps: Math.min(10, Math.max(3, +v('setupRunLaps').value || 5)),
+      quietInCorners: v('quietInCorners').checked, inCarAdvice: v('inCarAdvice').checked,
+      autoPit: v('autoPit').value, autoPitFuel: v('autoPitFuel').checked, autoPitTyres: v('autoPitTyres').value, autoPitTyreMinLaps: Math.max(1, +v('autoPitTyreMinLaps').value || 6),
+      autoPitPressures: v('autoPitPressures').checked, autoPitFastRepair: v('autoPitFastRepair').checked, autoPitWindscreen: v('autoPitWindscreen').checked, hotspotWarnings: v('hotspotWarnings').checked, setupRunLaps: Math.min(10, Math.max(3, +v('setupRunLaps').value || 5)),
       crewChiefEnabled: v('crewChiefEnabled').checked, crewChiefSkipDuplicates: v('crewChiefSkipDuplicates').checked, crewChiefPort: +v('crewChiefPort').value || 1883,
       voiceName: v('voiceName').value, voiceRate: +v('voiceRate').value, voiceVolume: +v('voiceVolume').value,
       referenceMode: v('referenceMode').value, deltaSectors: v('deltaSectors').value, fuelMarginLaps: +v('fuelMarginLaps').value, myUserId: +v('myUserId').value,
@@ -157,8 +162,6 @@ function ccStatus(cc) {
     : `CrewChief currently points at ${esc(cc.configServer || '?')}:${cc.configPort || '?'} — click Set up CrewChief.`;
   return `<div>${line}</div><div class="small muted" style="margin-top:4px">${cfg}</div>`;
 }
-
-const INCAR = [['bb', 'Brake bias'], ['tc', 'Traction control'], ['abs', 'ABS'], ['arbf', 'Front anti-roll bar'], ['arbr', 'Rear anti-roll bar']];
 
 function controlsHtml(c) {
   if (!c) return '<span class="muted small">Unavailable.</span>';

@@ -78,7 +78,6 @@ public partial class App : Application
                 Voice.Say(m.Text, m.Priority);
             };
 
-            Hub.InCar.Keys = new KeySender();   // in-car adjustments, only when the driver asks (Apply)
             Hub.Start();
 
             var bridge = new AppBridge(this);

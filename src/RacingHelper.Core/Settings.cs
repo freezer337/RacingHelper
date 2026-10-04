@@ -66,9 +66,16 @@ public sealed class AppSettings
     public bool LiveSetupAdvice { get; set; } = true;       // practice: start a guided setup session automatically
     public int SetupRunLaps { get; set; } = 5;              // clean laps per setup run
     public List<ButtonBinding> ButtonBindings { get; set; } = new();
-    // in-car adjustments by key press (opt-in): keys you bound in iRacing, by id: bb+ bb- tc+ tc- abs+ abs- arbf+ arbf- arbr+ arbr-
-    public bool InCarAutomation { get; set; }
-    public Dictionary<string, string> InCarKeys { get; set; } = new();
+    public bool InCarAdvice { get; set; } = true;            // "car adjustments: increase TC by 1, and move brake bias back 0.5"
+
+    // automatic pit service: set the pit menu as you enter pit road
+    public string AutoPit { get; set; } = "race";           // race | always | off
+    public bool AutoPitFuel { get; set; } = true;            // fuel to the finish (+ safety margin)
+    public string AutoPitTyres { get; set; } = "auto";       // auto (when enough laps left) | always | never | manual (don't touch)
+    public int AutoPitTyreMinLaps { get; set; } = 6;
+    public bool AutoPitPressures { get; set; } = true;       // cold pressures your last run here says you need
+    public bool AutoPitFastRepair { get; set; } = true;
+    public bool AutoPitWindscreen { get; set; } = true;
 
     // automation
     public bool AutoImportIbt { get; set; } = true;

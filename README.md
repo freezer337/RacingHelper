@@ -85,12 +85,15 @@ Verbosity is set in Settings.
   3. It notices when you've made the change ("Got it: Rear ArbBlade 2 to 1"), runs 5 more laps and compares pace and balance: "That change works: 0.25 quicker, and the oversteer is down 40 percent. Keep it." If it got worse, it asks you to put it back.
   4. It repeats this for up to four changes.
   - iRacing doesn't let other apps change the garage setup (springs, wing, garage anti-roll bars…). Its chat / pit commands only cover pit service: fuel, tyres, pressures, compound, tear-off, fast repair. So for garage items you make the change and the app checks it. In fixed-setup sessions it only suggests in-car adjustments.
-  - **In-car adjustments can be done for you** (opt-in, Settings → In-car adjustments). That's brake bias, TC, ABS, and anti-roll bars on cars that have them in the cockpit.
-    1. Bind a keyboard key to each control in iRacing (F13–F24 or numpad keys work well) and type the same key in Settings.
-    2. When the setup session suggests one, press **Apply** (bind it to a wheel button).
-    3. The app presses the key and reads the live value back after each press. It stops exactly on target ("Brake bias 57.7 to 57.2") and tells you if a key does nothing or goes the wrong way.
-    - It never changes anything unless you press Apply, and iRacing has to be the active window.
   - It starts on its own in practice, or from the Live page or a wheel button. The run length (3–10 laps) is in Settings.
+- **In-car adjustments, said not done.** Every few clean laps it checks your balance. If brake bias, TC, ABS or an in-car anti-roll bar would help, it tells you all of them in one sentence. For example: "Car adjustments: increase TC by 1, and move brake bias back 0.5. That's for oversteer on exit and understeer on entry." You make the change; it notices ("Got it: TC 4") and judges the new settings on fresh laps. It only suggests what your car actually has.
+- **Automatic pit service.** As you enter pit road, it fills in iRacing's pit menu for you, then says what it set:
+  - fuel to the finish (plus your safety margin)
+  - four tyres if enough laps are left, with the cold pressures your last run here says you need
+  - fast repair if there's damage
+  - a tear-off
+
+  It uses iRacing's own pit-service commands, the same ones as the `#fuel`, `#lf` chat macros. It's on in races by default and can be switched to every session or off in Settings. Only pit service can be set this way; wing, springs and other garage items can't be changed at a stop.
 - **Every pit stop:** iRacing's crew measures the tyres in the box. Those readings become a short report with camber and pressure advice (inside/outside spread, middle vs edges, front vs rear balance).
 - **Qualifying:** "Time for one more lap after this one" / "This is your last lap. Make it count."
 - **Only talks on straights.** Messages wait until you're not braking or cornering and there's room to finish the sentence before the next braking point. Urgent calls, corner tips (already timed before the braking point) and answers to your own questions go out straight away. Old low-priority chatter is dropped rather than read out late.
@@ -107,7 +110,8 @@ Bind any question to a button on your wheel or button box in **Settings → Whee
 | My pace | "Last lap 1:31.60, plus 0.29 to the reference. Most lost at turn 4, 0.39, throttle 12 m late. Last 5 clean laps average 1:31.87, spread 1.2." | |
 | Where's the time? | "Your best corners add up to 0.46 quicker than your best lap. Most of it at turn 1, 0.24 and turn 3, 0.13." | |
 | Setup session status, and start/stop | "Testing Rear anti-roll bar: 2 of 5 clean laps done." | |
-| Apply the engineer's in-car change | "Done. Traction control 3 to 4." | |
+| What should I change in the car? | "Car adjustments: increase TC by 1, and move brake bias back 0.5." | |
+| What will you set at my pit stop? | "When you box I'll set: 7 litres, four tyres at 176, 177, 171, 172 kPa, tear-off." | |
 | Repeat the last message | | `Ctrl+Shift+F8` |
 | Quiet mode on/off | Only important calls until you switch it back | |
 

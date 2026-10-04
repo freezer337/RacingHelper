@@ -216,5 +216,6 @@ public static class IRacingBroadcast
     /// <summary>Requests a tyre change with the given cold pressure (kPa) at the next stop. tyre: 0 LF, 1 RF, 2 LR, 3 RR.</summary>
     public static bool SetTyrePressure(int tyre, double kpa) => Send(Msg.PitCommand, (int)PitCmd.LF + tyre, (int)Math.Round(kpa));
     public static bool SetFuel(double litres) => Send(Msg.PitCommand, (int)PitCmd.Fuel, (int)Math.Ceiling(litres));
+    public static bool Pit(PitCmd cmd, int value = 0) => Send(Msg.PitCommand, (int)cmd, value);
     public static bool StartDiskTelemetry() => Send(Msg.TelemCommand, (int)TelemCmd.Start, 0);
 }

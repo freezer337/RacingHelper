@@ -44,7 +44,6 @@ public sealed class SetupEngineer
     bool _autoPending;
 
     public Phase State { get; private set; } = Phase.Off;
-    public InCarAdjuster? Adjuster { get; set; }
     readonly HashSet<string> _carDc = new();   // in-car adjustments this car has
     public int LapsPerRun => Math.Clamp(_settings().SetupRunLaps, 3, 10);
     public string Status { get; private set; } = "";
@@ -123,7 +122,7 @@ public sealed class SetupEngineer
     public void OnLap(RecordedLap lap, Frame f)
     {
         foreach (var k in f.Dc.Keys) _carDc.Add(k);
-        var adj = InCarAdjuster.All;
+        var adj = InCarAdjustments.All;
         string inCar = string.Join("|", adj.Select(a => f.Dc.TryGetValue(a.Var, out var v) ? Fmt(v) : "-"));
         if (_inCar == "") _inCar = inCar;
         else if (inCar != _inCar)
@@ -173,7 +172,6 @@ public sealed class SetupEngineer
         }
         else if (State == Phase.WaitChange && _change != null)
         {
-            if (Adjuster != null) Adjuster.Pending = null;
             bool expected = keys.Any(k => SetupOptimiser.Matches(_change.Parameter, k));
             _test = NewRun(_change.Parameter);
             State = Phase.Evaluate;
@@ -220,15 +218,12 @@ public sealed class SetupEngineer
         string where = cell != null ? $"{pick.Symptom} {(pick.Phase == "mid" ? "mid-corner" : "on " + pick.Phase)} in {cell.SpeedBand} corners" : pick.Symptom;
         string now = change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
         State = Phase.WaitChange;
-        Instruction = $"{change.Parameter}: {change.Action}";
-        string offer = "";
-        if (Adjuster != null && InCarAdjuster.ForParam(change.Parameter) is { } a && _carDc.Contains(a.Var) && InCarAdjuster.Parse(a, change.Action) is { } how)
-        {
-            Adjuster.Pending = new InCarAdjuster.Request(a, how.dir, how.amount, how.byValue, where);
-            if (Adjuster.CanApply(a, how.dir)) offer = " Press Apply and I'll do it for you.";
-        }
+        // in-car changes are said as a plain instruction: "increase TC by 1"
+        string inCarWords = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, where) is { } said
+            ? said.Words : $"{change.Parameter}, {change.Action}";
+        Instruction = InCar(change.Parameter) ? Cap(inCarWords) : $"{change.Parameter}: {change.Action}";
         Say(InCar(change.Parameter)
-            ? $"{intro}You've got {where}. Change it in the car: {change.Parameter}, {change.Action}.{now}{offer} I'll see it when you do."
+            ? $"{intro}You've got {where}. In the car: {inCarWords}.{now} I'll see it when you do."
             : $"{intro}You've got {where}. Box, and in the garage: {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.", 2);
     }
 
@@ -282,7 +277,7 @@ public sealed class SetupEngineer
     // ------------------------------------------------------------------ helpers
 
     bool InCar(string param) => param is "Brake bias" or "Traction control" or "ABS"
-        || (InCarAdjuster.ForParam(param) is { } a && _carDc.Contains(a.Var));   // e.g. in-car anti-roll bars
+        || (InCarAdjustments.ForParam(param) is { } a && _carDc.Contains(a.Var));   // e.g. in-car anti-roll bars
 
     static string Hash(SessionInfo si)
     {
@@ -292,6 +287,8 @@ public sealed class SetupEngineer
         var stable = flat.Where(kv => !SetupOptimiser.Volatile(kv.Key)).Select(kv => kv.Key + "=" + kv.Value);
         return Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(string.Join("\n", stable))))[..12];
     }
+
+    static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     static string Short(string key)
     {

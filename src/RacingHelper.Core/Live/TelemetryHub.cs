@@ -24,7 +24,8 @@ public sealed class TelemetryHub : IDisposable
     public CarManager CarManager { get; }
     public SetupEngineer SetupEngineer { get; }
     public Insights Insights { get; }
-    public InCarAdjuster InCar { get; }
+    public InCarAdvisor InCarAdvisor { get; }
+    public PitAutoService Pit { get; }
     public CrewChiefBridge CrewChief { get; }
     /// <summary>Spoken messages come out here (after waiting for a straight); subscribe to this for voice output.</summary>
     public RadioGate Radio { get; }
@@ -125,8 +126,8 @@ public sealed class TelemetryHub : IDisposable
         CarManager = new CarManager(Engineer, () => Settings.Current);
         SetupEngineer = new SetupEngineer(Engineer, () => Settings.Current);
         Insights = new Insights(Engineer, () => Settings.Current);
-        InCar = new InCarAdjuster(Engineer, () => Settings.Current, () => _state);
-        SetupEngineer.Adjuster = InCar;
+        InCarAdvisor = new InCarAdvisor(Engineer, () => Settings.Current);
+        Pit = new PitAutoService(Engineer, () => Settings.Current) { Commands = new IRacingPitCommands() };
         CrewChief = new CrewChiefBridge(() => Settings.Current);
         CrewChief.Log += m => Engineer.Info(m);
         Radio = new RadioGate(() => Settings.Current);
@@ -202,7 +203,8 @@ public sealed class TelemetryHub : IDisposable
         ("potential", "Where's the time? (my best corners combined)"),
         ("setup", "Setup session: where are we?"),
         ("setup-toggle", "Start / stop a setup session"),
-        ("apply", "Apply the engineer's in-car change (brake bias, TC, ABS, ARB)"),
+        ("car", "What should I change in the car? (TC, ABS, brake bias…)"),
+        ("pit", "What will you set at my pit stop?"),
         ("repeat", "Repeat the last message"),
         ("quiet", "Quiet mode on / off (only important calls)"),
     };
@@ -250,8 +252,10 @@ public sealed class TelemetryHub : IDisposable
                 if (SetupEngineer.State is SetupEngineer.Phase.Off or SetupEngineer.Phase.Done) SetupEngineer.Start();
                 else SetupEngineer.Stop();
                 return "";
-            case "apply":
-                return InCar.ApplyPending();
+            case "car":
+                return InCarAdvisor.Describe();
+            case "pit":
+                return driving ? Pit.Describe(f, ComputeFuel(f)) : "No session running.";
             case "repeat":
             {
                 var last = Radio.Last;
@@ -265,6 +269,30 @@ public sealed class TelemetryHub : IDisposable
             default:
                 return "";
         }
+    }
+
+    /// <summary>Cold pressures your last run here suggests (Tyres page logic), for the automatic pit service.</summary>
+    void LoadPitPressures(SessionInfo si, long currentId)
+    {
+        Enqueue(() =>
+        {
+            try
+            {
+                foreach (var s in Store.Db.GetSessions(si.CarPath, si.TrackKey).Where(x => x.Id != currentId).OrderByDescending(x => x.StartedAt).Take(5))
+                {
+                    var laps = Store.Db.GetLaps(s.Id).Where(l => l.Tyres != null && !l.OutLap).ToList();
+                    if (laps.Count < 3) continue;
+                    var adv = TyreAnalyzer.Analyze(laps.Select(l => l.Tyres!).ToList(), Settings.Current.TyreTargetFor(si.CarPath, si.CarCategory));
+                    if (adv.Count != 4) continue;
+                    var kpa = adv.Select(a => float.IsFinite(a.SuggestedCold) ? a.SuggestedCold : a.PressCold).ToArray();
+                    if (kpa.Any(k => !float.IsFinite(k) || k < 50)) continue;
+                    Pit.SetHistoryPressures(kpa, $"your run here on {s.StartedAt:d MMM}");
+                    return;
+                }
+                Pit.SetHistoryPressures(null, "");
+            }
+            catch { Pit.SetHistoryPressures(null, ""); }
+        });
     }
 
     // ------------------------------------------------------------------ main loop
@@ -322,6 +350,7 @@ public sealed class TelemetryHub : IDisposable
                 TyreManager.Update(f, _info.TrackLengthM, dt, f.SessionTime);
                 CarManager.Update(f);
                 Insights.SampleFuel(f);
+                Pit.Update(f, f.OnPitRoad ? ComputeFuel(f) : null, _source.IsLive);
                 UpdateLiveLap(f);
                 if (!_tracker.CurrentLapIsOut) Insights.Update(f, f.LapDistPct * _info.TrackLengthM, _model, _ref, Coach);
                 var (inZone, toZone) = RadioGate.Zone(f.LapDistPct * _info.TrackLengthM, _info.TrackLengthM, _model, _ref);
@@ -433,6 +462,9 @@ public sealed class TelemetryHub : IDisposable
         CarManager.Reset(ctx.Info, ctx.SessionType);
         SetupEngineer.Reset(ctx.Info, ctx.SessionType);
         Insights.Reset(ctx.Info, ctx.SessionType);
+        InCarAdvisor.Reset();
+        Pit.Reset(ctx.SessionType);
+        LoadPitPressures(ctx.Info, ctx.DbId);
         SetupEngineer.OnModel(_model);
         var row = SessionStore.ToRow(ctx, _source.IsLive ? "live" : "ibt");
         Enqueue(() => Store.EnsureSession(ctx, row.Source, _source is IbtSource ibt ? ibt.File.Path : ""));
@@ -585,6 +617,8 @@ public sealed class TelemetryHub : IDisposable
         SetupEngineer.OnModel(_model);
         SetupEngineer.OnLap(lap, fr);
         Insights.OnLap(lap, la);
+        InCarAdvisor.OnModel(_model);
+        InCarAdvisor.OnLap(lap, fr, SetupEngineer.State is not (SetupEngineer.Phase.Off or SetupEngineer.Phase.Done), TyreManager.Snapshot());
         Insights.OnLapGaps(lap.LapNumber, _standings, fr.PlayerCarIdx, fuel?.LapsRemaining ?? double.NaN);
         Insights.OnLapFuel(lap.LapNumber, fuel, reference, model);
         _lastCmp = cmp;
@@ -936,7 +970,6 @@ public sealed class TelemetryHub : IDisposable
             SetupInstruction = SetupEngineer.Instruction,
             QuietMode = Radio.Quiet,
             InCarValues = new Dictionary<string, float>(f.Dc),
-            PendingAdjust = InCar.Pending == null ? null : $"{InCar.Pending.Adj.Label} {(InCar.Pending.Dir > 0 ? "+" : "−")}{InCar.Pending.Amount:0.##}{(InCar.Pending.ByValue ? "" : " step")}",
         };
 
         if (_tracker.LapInProgress)

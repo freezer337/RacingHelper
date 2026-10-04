@@ -122,7 +122,6 @@ function renderLiveShell(el) {
     toast('Reference: ' + b.textContent);
   };
   $('#setup-toggle', el).onclick = async () => { await api('/api/ask/setup-toggle', { body: {} }); };
-  $('#setupsess', el).onclick = async e => { if (e.target.closest('[data-apply]')) { const r = await api('/api/ask/apply', { body: {} }); toast(r.answer); } };
   mapCanvas = $('#livemap', el);
   modelVersion = -1;
 }
@@ -177,7 +176,6 @@ function update(el, s) {
   const running = !['Off', 'Done'].includes(s.setupState);
   set('setup-toggle', running ? 'Stop' : 'Start');
   $('#setupsess', el).innerHTML = (s.setupInstruction ? `<div class="warn" style="font-weight:600;margin-bottom:6px">To do: ${esc(s.setupInstruction)}</div>` : '')
-    + (s.pendingAdjust ? `<div class="row" style="margin-bottom:6px"><button class="small primary" data-apply>Apply: ${esc(s.pendingAdjust)}</button></div>` : '')
     + `<div class="small ${s.setupStatus ? '' : 'muted'}">${esc(s.setupStatus || 'Drive a run, change one thing, compare. Start it here or from a wheel button.')}</div>`
     + (s.quietMode ? '<div class="small warn" style="margin-top:6px">Quiet mode on — only important calls.</div>' : '');
 
