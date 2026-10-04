@@ -71,7 +71,7 @@ The engineer speaks through Windows voices and also writes everything to the fee
 
 ### Live pace: your session analysis while you drive
 
-Open **Live pace** in the dashboard (a second monitor, a phone or tablet on `http://<your PC>:5199/#/pace` with "Allow LAN" on, or alt-tab) and keep driving. You don't need to leave the session: it updates a moment after every lap.
+Open **Live pace** in the dashboard (a second monitor, alt-tab, or a phone/tablet: turn on **Settings → Allow opening the dashboard from other devices**, restart Racing Helper, and the address to type on your phone is shown there and at the bottom of the sidebar) and keep driving. You don't need to leave the session: it updates a moment after every lap.
 
 - **Last lap, best lap, theoretical best** (all your best corners together, and which corners hold the time), **trend** (s per lap over your last clean laps: getting faster / slower / steady) and the average and spread of your last 5 clean laps.
 - **This lap**, live: delta, predicted lap, sectors and the last corner.

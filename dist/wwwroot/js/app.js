@@ -67,7 +67,7 @@ async function init() {
   startLive();
   onLive(updateStatus);
   const status = await api('/api/status').catch(() => null);
-  $('#sidebar-foot').innerHTML = status ? `Version <b>${esc(status.version || '1.0')}</b><br>Dashboard: <span class="num">${esc(status.url)}</span><br>VR panel: <span class="num">${esc(status.url)}kneeboard.html</span>` : '';
+  $('#sidebar-foot').innerHTML = status ? `Version <b>${esc(status.version || '1.0')}</b><br>Dashboard: <span class="num">${esc(status.url)}</span><br>VR panel: <span class="num">${esc(status.url)}kneeboard.html</span>${status.lanUrls?.length ? `<br>On your phone: <span class="num">${esc(status.lanUrls[0])}</span>` : ''}` : '';
   window.addEventListener('hashchange', navigate);
   navigate();
   // surface background import results

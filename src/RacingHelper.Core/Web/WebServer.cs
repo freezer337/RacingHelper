@@ -35,6 +35,36 @@ public sealed class WebServer : IAsyncDisposable
     readonly IAppBridge _app;
     WebApplication? _web;
     public string Url { get; private set; } = "";
+    bool _lan;
+    int _port;
+
+    /// <summary>Addresses other devices on your network (phone, tablet) can open, when "Allow LAN" is on.</summary>
+    public List<string> LanUrls()
+    {
+        if (!_lan) return new();
+        var list = new List<(string url, int rank)>();
+        try
+        {
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType is System.Net.NetworkInformation.NetworkInterfaceType.Loopback or System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
+                string name = (ni.Name + " " + ni.Description).ToLowerInvariant();
+                if (name.Contains("virtual") || name.Contains("vmware") || name.Contains("hyper-v") || name.Contains("vethernet") || name.Contains("wsl") || name.Contains("vpn")) continue;
+                foreach (var a in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (a.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                    var b = a.Address.GetAddressBytes();
+                    if (b[0] == 169 && b[1] == 254) continue;   // no DHCP address
+                    // home networks first (192.168.x.x), then other private ranges
+                    int rank = b[0] == 192 && b[1] == 168 ? 0 : b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ? 1 : 2;
+                    list.Add(($"http://{a.Address}:{_port}/", rank));
+                }
+            }
+        }
+        catch { }
+        return list.OrderBy(x => x.rank).Select(x => x.url).Distinct().ToList();
+    }
 
     public static readonly JsonSerializerOptions Json = Create();
     static JsonSerializerOptions Create()
@@ -66,6 +96,7 @@ public sealed class WebServer : IAsyncDisposable
         builder.Logging.ClearProviders();
         int port = S.WebPort;
         builder.WebHost.UseUrls(S.AllowLan ? $"http://0.0.0.0:{port}" : $"http://127.0.0.1:{port}");
+        _lan = S.AllowLan; _port = port;
         var app = builder.Build();
         app.UseWebSockets();
         app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = new PhysicalFileProvider(root) });
@@ -111,6 +142,7 @@ public sealed class WebServer : IAsyncDisposable
             sessionId = _hub.CurrentSessionDbId,
             myId = _hub.Analysis.MyDriverId,
             url = Url,
+            lanUrls = LanUrls(),
         }));
         app.MapGet("/api/live", () => J(_hub.State));
         app.Map("/ws/live", async (HttpContext ctx) =>

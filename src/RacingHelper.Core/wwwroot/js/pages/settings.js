@@ -89,7 +89,11 @@ export async function render(root) {
           <label class="field">Setup library<input id="setupLibraryFolder" value="${esc(s.setupLibraryFolder)}"></label>
           <label class="field">Dashboard port <span class="dim">(restart to apply)</span><input type="number" id="webPort" value="${s.webPort}"></label>
         </div>
-        <div style="margin-top:12px">${chk('allowLan', s.allowLan, 'Allow opening the dashboard from other devices on my network (e.g. a tablet next to the rig) — restart to apply')}</div>
+        <div style="margin-top:12px">${chk('allowLan', s.allowLan, 'Allow opening the dashboard from other devices on my network (e.g. a phone or tablet next to the rig) — restart Racing Helper to apply')}</div>
+        <div class="small" style="margin-top:8px">${status.lanUrls?.length
+          ? `On your phone or tablet (same Wi-Fi as this PC), open: ${status.lanUrls.map(u => `<b class="num">${esc(u)}#/pace</b>`).join(' or ')}. If it doesn't load, allow Racing Helper through Windows Firewall for private networks.`
+          : s.allowLan ? '<span class="muted">Restart Racing Helper (tray icon → Exit, then start it again) and the address for your phone appears here.</span>'
+          : '<span class="muted">Turn this on, save, and restart Racing Helper: the address to type on your phone appears here.</span>'}</div>
       </div>
     </div>`;
   const radioCheck = async () => {
