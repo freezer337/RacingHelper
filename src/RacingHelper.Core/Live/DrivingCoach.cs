@@ -76,16 +76,8 @@ public sealed class DrivingCoach
         for (int i = 0; i < corners.Count; i++)
         {
             var c = corners[i];
-            var r = reference.Analysis.Corners.FirstOrDefault(x => x.Corner == c.Index);
-            float brake = r != null && float.IsFinite(r.BrakePoint) ? r.BrakePoint
-                        : r != null && float.IsFinite(r.LiftPoint) ? r.LiftPoint
-                        : c.Start - 60;
-            float approach = r != null && float.IsFinite(r.EntrySpeed) ? r.EntrySpeed : Math.Max(f.Speed, 20);
-            float call = brake - approach * SpeechSeconds;
-            float floor = i > 0 ? corners[i - 1].End : 0;
-            if (call < floor) call = floor;
-            if (brake - call < 40 || call < 0) continue;              // no room to say it before this corner
-            if (!(prev < call && d >= call)) continue;
+            float call = CallPoint(model, i, reference, f.Speed, out float brake);
+            if (float.IsNaN(call) || !(prev < call && d >= call)) continue;
 
             if (_lastTipLap.TryGetValue(c.Index, out int lastLap) && lastLap >= f.Lap - 1) return; // give it a lap before repeating
             var tip = TipFor(c.Index, out float before);
@@ -101,6 +93,27 @@ public sealed class DrivingCoach
             return;
         }
     }
+
+    /// <summary>
+    /// Where to start talking about corner <paramref name="i"/> so a short sentence ends before its braking point
+    /// (NaN when the straight before it is too short). <paramref name="brake"/> = the braking point.
+    /// </summary>
+    public static float CallPoint(TrackModel model, int i, ReferenceLap? reference, float speedNow, out float brake)
+    {
+        var corners = model.Corners;
+        var c = corners[i];
+        var r = reference?.Analysis.Corners.FirstOrDefault(x => x.Corner == c.Index);
+        brake = r != null && float.IsFinite(r.BrakePoint) ? r.BrakePoint
+              : r != null && float.IsFinite(r.LiftPoint) ? r.LiftPoint
+              : c.Start - 60;
+        float approach = r != null && float.IsFinite(r.EntrySpeed) ? r.EntrySpeed : Math.Max(speedNow, 20);
+        float call = brake - approach * SpeechSeconds;
+        float floor = i > 0 ? corners[i - 1].End : 0;
+        if (call < floor) call = floor;
+        return brake - call < 40 || call < 0 ? float.NaN : call;
+    }
+
+    public bool TippedThisLap(int corner, int lap) => _lastTipLap.TryGetValue(corner, out int l) && l == lap;
 
     (string issue, string text)? TipFor(int corner, out float before)
     {

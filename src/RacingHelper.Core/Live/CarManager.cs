@@ -6,7 +6,6 @@ namespace RacingHelper.Live;
 
 /// <summary>
 /// Looks after the car through the session type:
-///  • practice — watches your handling over the last laps and has a setup change ready for the pit stop
 ///  • every stop — reads the crew's tyre temperatures in the pit box and turns them into camber / pressure advice
 ///  • qualifying — tells you whether there's time for another lap
 /// </summary>
@@ -17,11 +16,6 @@ public sealed class CarManager
     string _kind = "practice";
     SessionInfo? _si;
 
-    readonly List<LapData> _recent = new();
-    int _lapsSinceAdvice;
-    readonly HashSet<string> _advised = new();
-    string? _pendingSetup;
-    string _setupHash = "";
 
     bool _inStall;
     double _stallSince = double.NaN;
@@ -29,7 +23,6 @@ public sealed class CarManager
     int _lapsSinceStall;
     double _lastLapTime = double.NaN;
 
-    public string? PendingSetupAdvice => _pendingSetup;
 
     public CarManager(RaceEngineer engineer, Func<AppSettings> settings)
     {
@@ -41,61 +34,18 @@ public sealed class CarManager
     {
         _si = si;
         _kind = TyreManager.Kind(sessionType);
-        _recent.Clear();
-        _lapsSinceAdvice = 0;
-        _advised.Clear();
-        _pendingSetup = null;
         _inStall = false; _stallHandled = true; _lapsSinceStall = 0;
         _lastLapTime = double.NaN;
     }
 
     public void OnSessionInfo(SessionInfo si) => _si = si;
 
-    public void OnLap(RecordedLap lap, TrackModel? model, string setupHash, double sessionTimeRemain, int lapsRemain)
+    public void OnLap(RecordedLap lap, double sessionTimeRemain, int lapsRemain)
     {
         _lapsSinceStall++;
         if (lap.Valid && !lap.OutLap && !lap.InLap) _lastLapTime = lap.LapTime;
 
-        if (setupHash != _setupHash)
-        {
-            // new setup → judge it on its own laps
-            _setupHash = setupHash;
-            _recent.Clear(); _lapsSinceAdvice = 0; _advised.Clear(); _pendingSetup = null;
-        }
-        if (lap.Valid && !lap.OutLap && !lap.InLap && lap.Data != null)
-        {
-            _recent.Add(lap.Data);
-            if (_recent.Count > 6) _recent.RemoveAt(0);
-            _lapsSinceAdvice++;
-        }
-        if (_kind == "practice" && _settings().LiveSetupAdvice && _recent.Count >= 4 && _lapsSinceAdvice >= 4) SetupCheck(model);
         if (_kind == "quali") QualiTiming(sessionTimeRemain, lapsRemain);
-    }
-
-    void SetupCheck(TrackModel? model)
-    {
-        _lapsSinceAdvice = 0;
-        var si = _si;
-        if (si == null) return;
-        HandlingReport rep;
-        try { rep = HandlingAnalyzer.Analyze(_recent, model); } catch { return; }
-        if (!rep.Valid) return;
-        var reqs = SetupOptimiser.FromHandling(rep, si.CarCategory);
-        foreach (var req in reqs)
-        {
-            string id = req.Symptom + "/" + req.Phase + "/" + req.Speed;
-            if (_advised.Contains(id)) continue;
-            var adv = SetupOptimiser.Advise(req, si.CarSetup);
-            var change = adv.Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
-            if (change == null) continue;
-            _advised.Add(id);
-            var cell = rep.Cells.FirstOrDefault(c => c.Tendency == req.Symptom && c.Phase == req.Phase);
-            string where = cell != null ? $"{req.Symptom} {(req.Phase == "mid" ? "mid-corner" : "on " + req.Phase)} in {cell.SpeedBand} corners" : req.Symptom;
-            string now = change.Current.Count > 0 ? $" Currently {change.Current[0].Split(" = ").Last()}." : "";
-            _pendingSetup = $"Setup idea: you've got {where}. {change.Parameter}: {change.Action}.{now}";
-            _eng.Say(_pendingSetup + " I'll remind you in the pits.", "setup", 0, speak: false);
-            return;
-        }
     }
 
     void QualiTiming(double remain, int lapsRemain)
@@ -119,11 +69,6 @@ public sealed class CarManager
         bool driven = _lapsSinceStall >= 1;
         _lapsSinceStall = 0;
         if (driven) TyreReport(f);
-        if (_pendingSetup != null)
-        {
-            _eng.Say(_pendingSetup, "setup", 1);
-            _pendingSetup = null;
-        }
     }
 
     void TyreReport(Frame f)

@@ -33,6 +33,7 @@ Closing the dashboard window keeps the app running in the tray, so recording, ov
 | `Ctrl+Shift+F10` | Hide / show all overlays |
 | `Ctrl+Shift+F11` | Switch delta reference: PB → session best → last lap |
 | `Ctrl+Shift+F12` | Open the dashboard |
+| `Ctrl+Shift+F5` / `F6` / `F7` / `F8` | Ask: tyres / fuel / gaps / repeat the last message (any question can also go on a wheel button) |
 
 The dashboard also runs at http://127.0.0.1:5199. Enable LAN access in Settings to open it on a tablet next to the rig.
 
@@ -72,14 +73,45 @@ Verbosity is set in Settings.
 
 - **Tyres: cold → push → cool → push.**
   - Leaving the pits it tells you the tyres are cold, then "up to temperature, you can push".
-  - When you start overheating a tyre it says which one ("Right front overheating. Cool them for a lap: brake a little earlier, less steering…"), and "Tyres have cooled down. Good to push again" once you've driven a normal stretch.
+  - When you start overheating a tyre it says which one and how long cooling should take ("Right front overheating… Cooling them takes about a lap and a half"), and "Tyres have cooled down. Good to push again" once you've driven a normal stretch.
+  - The cool-down estimate keeps updating from how you actually drive. Cooling faster than expected: "You're doing better than expected. About half a lap more." Still sliding: "Still sliding the rears, they can't cool like this. Ease off a bit more." Slower than planned: "About one lap more, keep it smooth".
   - iRacing doesn't publish tyre temperatures while you drive, so this measures the cause instead: how much each tyre is **sliding** (steering vs how much the car actually rotates, weighted by speed, g-force and which side is loaded).
   - The last lap is compared with your own clean laps at the same places on track. It learns that after 3 clean laps, then remembers it per car and track (`tyre-baselines.json`), so next time the calls work from lap 1.
   - Checked against real .ibt surface temperatures: the calls land on the laps where the measured temperatures and peaks climb.
 - **Corner coaching.** When you keep losing time in a corner for the same reason, you get one short tip *before* that corner on the next lap, timed to finish before the braking point. For example: "Turn 4, turn it in a bit later and sharper, so you can get on the power earlier", or "Turn 2, brake later. You're about 10 metres early". If the next attempt is quicker you hear "Better through turn 2". It runs in practice by default; you can switch it on for qualifying and races, or off.
-- **Setup while you practise.** After every 4 clean laps on the same setup it checks your handling at the limit. If there's a clear pattern, it has a change ready, which it tells you when you stop in the pit box. For example: "oversteer on exit in medium corners → Rear anti-roll bar: soften one step. Currently 2."
+- **Guided setup session (practice).** Like working with a real engineer:
+  1. "Give me 5 clean laps at a steady pace." It counts down ("2 more laps", "last lap of this run").
+  2. It analyses your handling at the limit: "You've got oversteer on exit in medium corners. Box, and in the garage: Rear anti-roll bar, soften one step. It's on 2 now. Then 5 laps."
+  3. It notices when you've made the change ("Got it: Rear ArbBlade 2 to 1"), runs 5 more laps and compares pace and balance: "That change works: 0.25 quicker, and the oversteer is down 40 percent. Keep it." If it got worse, it asks you to put it back.
+  4. It repeats this for up to four changes.
+  - iRacing doesn't let other apps change your setup, so you make the change in the garage and the app checks it. In fixed-setup sessions it only suggests in-car adjustments (brake bias, TC, ABS) and spots when you change them.
+  - It starts on its own in practice, or from the Live page or a wheel button. The run length (3–10 laps) is in Settings.
 - **Every pit stop:** iRacing's crew measures the tyres in the box. Those readings become a short report with camber and pressure advice (inside/outside spread, middle vs edges, front vs rear balance).
 - **Qualifying:** "Time for one more lap after this one" / "This is your last lap. Make it count."
+- **Only talks on straights.** Messages wait until you're not braking or cornering and there's room to finish the sentence before the next braking point. Urgent calls, corner tips (already timed before the braking point) and answers to your own questions go out straight away. Old low-priority chatter is dropped rather than read out late.
+
+### Ask the engineer from your wheel
+
+Bind any question to a button on your wheel or button box in **Settings → Wheel buttons & questions**: click **Bind**, then press the button. It works with Moza, Fanatec, Simucube or any controller Windows sees, while iRacing has focus, and on every button the device has.
+
+| Question | Example answer | Keyboard |
+|---|---|---|
+| How are my tyres? | "The right front is hot. Fronts at 124 percent of normal, rears 98. About one lap more cooling." | `Ctrl+Shift+F5` |
+| Fuel | "8.3 litres, 8.3 laps at 1.00 a lap. Enough to the end, 3.9 spare." | `Ctrl+Shift+F6` |
+| Gaps | "P4. Car ahead 2.2 seconds, you're gaining 0.4 a lap, on him in about 4 laps. Car behind 1.5 back and steady." | `Ctrl+Shift+F7` |
+| My pace | "Last lap 1:31.60, plus 0.29 to the reference. Most lost at turn 4, 0.39, throttle 12 m late. Last 5 clean laps average 1:31.87, spread 1.2." | |
+| Where's the time? | "Your best corners add up to 0.46 quicker than your best lap. Most of it at turn 1, 0.24 and turn 3, 0.13." | |
+| Setup session status, and start/stop | "Testing Rear anti-roll bar: 2 of 5 clean laps done." | |
+| Repeat the last message | | `Ctrl+Shift+F8` |
+| Quiet mode on/off | Only important calls until you switch it back | |
+
+### More calls you don't get from iRacing
+
+- **Gap trends (race):** every few laps, who's catching whom and when. "Car ahead 2.2 seconds, you're gaining 0.4 a lap, on him in about 4 laps." / "Car behind is 0.3 a lap quicker, with you in about 3 laps."
+- **Off-track hot spots:** before a corner where you've gone off twice this session: "Careful at turn 6. You've been off there twice."
+- **Fuel-save coaching:** when you're short to the finish, how much to save and exactly where. "0.8 litres short. Save 0.10 a lap: lift and coast about 60 metres before the braking points into turn 1 and turn 4." It says when the saving has done the job, or tells you straight that you need a splash.
+- **Braking consistency:** "Turn 2: your braking point moved around 30 metres over the last five laps. Pick one marker and brake there every lap."
+- **Potential:** in practice and qualifying, every few laps, how much your best corners are worth together and where.
 
 ### CrewChief V4 as the voice
 
@@ -121,6 +153,8 @@ iRacing's .ibt file is imported automatically, which adds GPS lines, tyre data a
 - **Damage:** iRacing doesn't expose per-part damage, so the Damage overlay uses what it does expose: mandatory/optional repair time, the meatball flag, engine warnings, and pace loss after contact.
 - **Weather forecast:** iRacing provides no forecast, so the forecast overlay projects the last ~20 minutes' trend and is labelled as a projection.
 - **Live tyre data:** during a live session iRacing only gives pit-measured carcass temps and cold pressures. Full surface temps and hot pressures come from the .ibt file after the session; keep iRacing telemetry logging on (the app can switch it on for you).
+- **Gap trends** need other cars' data, which iRacing only gives live (not in .ibt replays).
+- **Wheel buttons** use Windows Raw Input; if a button doesn't register, check that Windows sees the device in *Set up USB game controllers*.
 - **Tyre management is relative, not in degrees.** It knows "you're sliding the fronts 25% more than your normal clean laps here", not "the fronts are 104°C". It was validated on two F4 sessions (Bathurst, Phillip Island). The thresholds may need tuning for very different cars, and it can't see straight-line lock-ups (no live wheel speeds).
 - **CrewChief link:** needs CrewChief's MQTT feature (CrewChief V4 4.16+). Racing Helper only listens on this PC (127.0.0.1); change the port in Settings if another MQTT broker already uses 1883.
 - **Setup pressures:** `.sto` files are binary, so the installer copies setups but can't rewrite pressures. Use the Tyre tool's "send to pit" instead.

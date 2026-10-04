@@ -126,6 +126,7 @@ public sealed class EngineerMessage
     public bool Speak { get; set; } = true;
     public float LapDist { get; set; } = float.NaN;     // where it was said (m); with ValidUntil: drop it if it can't be heard before then
     public float ValidUntil { get; set; } = float.NaN;  // lap distance (m) after which a coaching tip is useless
+    public bool Immediate { get; set; }                 // answers to the driver's own questions: no waiting for a straight
 }
 
 public sealed class TyreManagerLive
@@ -136,6 +137,7 @@ public sealed class TyreManagerLive
     public float FrontLoad { get; set; } = float.NaN;
     public float RearLoad { get; set; } = float.NaN;
     public bool HasBaseline { get; set; }
+    public float CoolLaps { get; set; } = float.NaN;    // estimated laps until hot tyres are back to normal
 }
 
 /// <summary>Immutable-by-convention snapshot of everything live, published ~20× per second.</summary>
@@ -219,6 +221,10 @@ public sealed class LiveState
     public List<TyreLive> Tyres { get; set; } = new();
     public TyreManagerLive? TyreLoad { get; set; }
     public string CoachTip { get; set; } = "";
+    public string SetupState { get; set; } = "Off";        // guided setup session: Off / Baseline / WaitChange / Evaluate / Done
+    public string SetupStatus { get; set; } = "";
+    public string? SetupInstruction { get; set; }
+    public bool QuietMode { get; set; }
     public WeatherLive Weather { get; set; } = new();
     public HealthLive Health { get; set; } = new();
 

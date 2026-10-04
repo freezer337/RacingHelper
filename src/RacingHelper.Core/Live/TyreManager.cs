@@ -65,6 +65,19 @@ public sealed class TyreManager
     double _hotSince = double.NaN, _lastReminder = double.NaN;
     double _now;
 
+    // cool-down plans (front axle = 0, rear = 1): estimate, then re-estimate from how you actually drive
+    sealed class CoolPlan
+    {
+        public bool Active;
+        public int Elapsed;               // bins driven since it went hot
+        public float FirstFinish = float.NaN, Announced = float.NaN;  // projected finish, in bins since it went hot
+        public int LastUpdate = -1000, StillSliding;
+        public float Remaining = float.NaN;    // laps, latest projection
+    }
+    readonly CoolPlan[] _plan = { new(), new() };
+    const float GentleRatio = 0.92f;      // what "cooling them" usually looks like: a bit less sliding than normal
+    const int RecentBins = 15;
+
     public TyreManager(RaceEngineer engineer, Func<AppSettings> settings)
     {
         _eng = engineer;
@@ -77,6 +90,7 @@ public sealed class TyreManager
     public TyreManagerLive Snapshot() => new()
     {
         State = _hotFront && _hotRear ? "hot" : _hotFront ? "hot-front" : _hotRear ? "hot-rear" : _cold ? "cold" : _base != null ? "ok" : "learning",
+        CoolLaps = CoolLapsRemaining,
         WarmPct = _cold ? (float)Math.Min(1, _warmWork / Math.Max(1e-6, _warmNeed * BaseWork)) : 1,
         Load = (float[])_ratio.Clone(),
         FrontLoad = _front,
@@ -117,6 +131,7 @@ public sealed class TyreManager
         ResetLap();
         Array.Clear(_lastSet); Array.Clear(_last); _setCount = 0;
         _hotFront = _hotRear = false; _hotFrontRun = _hotRearRun = _coolFrontRun = _coolRearRun = 0;
+        foreach (var p in _plan) { p.Active = false; p.Remaining = float.NaN; }
         for (int i = 0; i < 4; i++) _ratio[i] = float.NaN;
         _front = _rear = float.NaN;
         _warmWork = 0;
@@ -272,25 +287,170 @@ public sealed class TyreManager
         bool wasFront = _hotFront, wasRear = _hotRear;
         Step(_front, ref _hotFront, ref _hotFrontRun, ref _coolFrontRun);
         Step(_rear, ref _hotRear, ref _hotRearRun, ref _coolRearRun);
+        bool quickerThanPlanned = false;
+        for (int a = 0; a < 2; a++)
+        {
+            bool hot = a == 0 ? _hotFront : _hotRear, was = a == 0 ? wasFront : wasRear;
+            var p = _plan[a];
+            if (hot && !was) StartPlan(a);
+            else if (!hot && was)
+            {
+                quickerThanPlanned |= float.IsFinite(p.FirstFinish) && p.Elapsed < p.FirstFinish - 0.4f * Bins;
+                p.Active = false; p.Remaining = float.NaN;
+            }
+            else if (hot) p.Elapsed++;
+        }
 
+        string est = CoolEstimateText();
         if (_hotFront && _hotRear && !(wasFront && wasRear))
-            Announce("All four tyres are overheating. You're overdriving. Back off for a lap and let them cool.", 2);
+            Announce($"All four tyres are overheating. You're overdriving. Back off and let them cool{est}.", 2);
         else if (_hotFront && !wasFront)
-            Announce($"{Which(0, "Front tyres")} overheating. Cool them for a lap: brake a little earlier, less steering, let the car rotate.", 2);
+            Announce($"{Which(0, "Front tyres")} overheating. Brake a little earlier, less steering, let the car rotate. Cooling them takes{est}.", 2);
         else if (_hotRear && !wasRear)
-            Announce($"{Which(2, "Rear tyres")} overheating. Smooth on the throttle out of the slow corners for a lap, don't slide the rear.", 2);
+            Announce($"{Which(2, "Rear tyres")} overheating. Smooth on the throttle out of the slow corners, don't slide the rear. Cooling them takes{est}.", 2);
         else if (wasFront && wasRear && (_hotFront != _hotRear))
             _eng.Say(_hotFront ? "Rears are OK again. Fronts still hot, keep cooling them." : "Fronts are OK again. Rears still hot, keep cooling them.", "tyres", 1, "tyres-partial", 30);
         else if (!_hotFront && !_hotRear && (wasFront || wasRear))
         {
             _hotSince = double.NaN;
-            _eng.Say(_sessionKind == "quali" ? "Tyres are back. Push." : "Tyres have cooled down. Good to push again.", "tyres", 1, "tyres-ok", 30);
+            string quick = quickerThanPlanned ? " Quicker than expected, well done." : "";
+            _eng.Say(_sessionKind == "quali" ? $"Tyres are back.{quick} Push." : $"Tyres have cooled down.{quick} Good to push again.", "tyres", 1, "tyres-ok", 30);
         }
-        else if ((_hotFront || _hotRear) && double.IsFinite(_lastReminder) && _now - _lastReminder > 240)
+        else if (_hotFront || _hotRear) TrackCooling();
+    }
+
+    // ------------------------------------------------------------------ cool-down estimate
+
+    void StartPlan(int axle)
+    {
+        var p = _plan[axle];
+        p.Active = true; p.Elapsed = 0; p.LastUpdate = 0; p.StillSliding = 0;
+        float bins = BinsToCool(axle, GentleRatio);
+        p.FirstFinish = p.Announced = bins;
+        p.Remaining = bins / Bins;
+    }
+
+    /// <summary>Recent sliding on an axle vs the baseline at the same places (the last ~15% of the lap).</summary>
+    float RecentRatio(int axle)
+    {
+        var bs = _base;
+        if (bs == null || _bin < 0) return float.NaN;
+        double num = 0, den = 0;
+        for (int k = 1; k <= RecentBins; k++)
         {
-            _lastReminder = _now;
-            _eng.Say($"{(_hotFront && _hotRear ? "Tyres" : _hotFront ? "Fronts" : "Rears")} still hot. Keep cooling them.", "tyres", 1, "tyres-still", 120);
+            int b = ((_bin - k) % Bins + Bins) % Bins;
+            if (!_lastSet[b]) continue;
+            for (int t = axle * 2; t < axle * 2 + 2; t++) { num += _last[t, b]; den += bs[t, b]; }
         }
+        return den > 1e-6 ? (float)(num / den) : float.NaN;
+    }
+
+    /// <summary>
+    /// Bins until the axle counts as cool if you keep sliding at <paramref name="rate"/> × normal: the rolling last-lap
+    /// window is stepped forward bin by bin until it is back under the cool line, plus the sustained stretch it needs.
+    /// NaN = it won't cool at that rate.
+    /// </summary>
+    float BinsToCool(int axle, float rate)
+    {
+        var bs = _base;
+        if (bs == null || !float.IsFinite(rate) || rate >= CoolRatio) return float.NaN;
+        double num = 0, den = 0;
+        var cur = new double[Bins]; var bas = new double[Bins];
+        for (int b = 0; b < Bins; b++)
+        {
+            bas[b] = bs[axle * 2, b] + bs[axle * 2 + 1, b];
+            if (!_lastSet[b]) continue;
+            cur[b] = _last[axle * 2, b] + _last[axle * 2 + 1, b];
+            num += cur[b]; den += bas[b];
+        }
+        if (den <= 1e-6) return float.NaN;
+        for (int k = 1; k <= Bins; k++)
+        {
+            if (num / den <= CoolRatio) return k - 1 + CoolBins;
+            int b = ((_bin + k) % Bins + Bins) % Bins;
+            if (_lastSet[b]) num += rate * bas[b] - cur[b];
+            else { num += rate * bas[b]; den += bas[b]; }
+        }
+        return num / den <= CoolRatio ? Bins + CoolBins : float.NaN;
+    }
+
+    /// <summary>Re-estimates every ~10% of a lap from how you're actually driving and says when it changes.</summary>
+    void TrackCooling()
+    {
+        for (int a = 0; a < 2; a++)
+        {
+            var p = _plan[a];
+            if (!p.Active || p.Elapsed < 10 || p.Elapsed - p.LastUpdate < 10) continue;
+            float rc = RecentRatio(a);
+            float rest = BinsToCool(a, rc);
+            string axle = a == 0 ? "fronts" : "rears";
+            if (float.IsNaN(rest))
+            {
+                p.StillSliding++;
+                if (p.StillSliding >= 3 && p.Elapsed - p.LastUpdate >= 30)
+                {
+                    p.LastUpdate = p.Elapsed;
+                    _eng.Say($"Still sliding the {axle}, they can't cool like this. Ease off a bit more.", "tyres", 2, "tyres-sliding-" + a, 30);
+                }
+                continue;
+            }
+            p.StillSliding = 0;
+            p.Remaining = rest / Bins;
+            float finish = p.Elapsed + rest;
+            float diff = finish - p.Announced;
+            if (Math.Abs(diff) < 0.4f * Bins || p.Elapsed - p.LastUpdate < 25) continue;
+            if (diff > 0 && rest < 0.75f * Bins) continue;    // a bit late but nearly there: nothing useful to say
+            p.LastUpdate = p.Elapsed;
+            p.Announced = finish;
+            _eng.Say(diff < 0
+                ? $"You're doing better than expected. {Cap(LapsText(rest / Bins))} more cooling the {axle}."
+                : $"The {axle} are cooling slower than planned. {Cap(LapsText(rest / Bins))} more, keep it smooth.", "tyres", 1, "tyres-cool-" + a, 20);
+        }
+    }
+
+    public float CoolLapsRemaining
+    {
+        get
+        {
+            float r = float.NaN;
+            foreach (var p in _plan) if (p.Active && float.IsFinite(p.Remaining)) r = float.IsNaN(r) ? p.Remaining : Math.Max(r, p.Remaining);
+            return r;
+        }
+    }
+
+    string CoolEstimateText()
+    {
+        float laps = CoolLapsRemaining;
+        return float.IsFinite(laps) ? " " + LapsText(laps) : " about a lap";
+    }
+
+    static string LapsText(float laps) => laps switch
+    {
+        < 0.4f => "less than half a lap",
+        < 0.75f => "about half a lap",
+        < 1.25f => "about one lap",
+        < 1.75f => "about a lap and a half",
+        _ => $"about {MathF.Round(laps):0} laps",
+    };
+
+    static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    /// <summary>Spoken answer for "how are my tyres?".</summary>
+    public string Describe()
+    {
+        if (!Enabled) return "Tyre management is switched off.";
+        if (_cold) return $"Tyres are still coming in, about {Math.Min(100, Snapshot().WarmPct * 100):0} percent there.";
+        if (_base == null) return "I'm still learning your normal tyre load. Give me three clean laps.";
+        string Pct(float r) => float.IsFinite(r) ? $"{r * 100:0} percent" : "unknown";
+        string load = $"Fronts at {Pct(_front)} of normal, rears {Pct(_rear)}.";
+        if (_hotFront || _hotRear)
+        {
+            string one = _hotFront && _hotRear ? "" : Which(_hotFront ? 0 : 2, "");
+            string which = _hotFront && _hotRear ? "All four are" : one.Length > 0 ? one + " is" : _hotFront ? "The fronts are" : "The rears are";
+            float laps = CoolLapsRemaining;
+            return $"{which} hot. {load} {(float.IsFinite(laps) ? Cap(LapsText(laps)) + " more cooling." : "Ease off to let them cool.")}";
+        }
+        return $"Tyres are good. {load} You can push.";
     }
 
     void Announce(string text, int prio)

@@ -111,6 +111,7 @@ function renderLiveShell(el) {
       </div>
       <div class="grid" style="align-content:start">
         <div class="card tight"><canvas id="livemap" class="map-canvas"></canvas></div>
+        <div class="card"><div class="card-head"><h3 class="grow">Setup session</h3><button class="small" id="setup-toggle">Start</button></div><div id="setupsess"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Fuel</h3><a href="#/fuel" class="small">Planner →</a></div><div id="fuel"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Tyres</h3><a href="#/tyres" class="small">Tyre tool →</a></div><div id="tyreload"></div><div id="tyres"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Conditions & car</h3></div><div id="wx"></div></div>
@@ -120,6 +121,7 @@ function renderLiveShell(el) {
     await api('/api/reference', { body: { mode: b.dataset.m } });
     toast('Reference: ' + b.textContent);
   };
+  $('#setup-toggle', el).onclick = async () => { await api('/api/ask/setup-toggle', { body: {} }); };
   mapCanvas = $('#livemap', el);
   modelVersion = -1;
 }
@@ -171,6 +173,11 @@ function update(el, s) {
   $('#feed', el).innerHTML = feedHtml(s.messages);
   $('#coachtip', el).innerHTML = s.coachTip ? `<span class="muted">Coach:</span> ${esc(s.coachTip)}` : '';
   $('#tyreload', el).innerHTML = tyreLoadHtml(s.tyreLoad);
+  const running = !['Off', 'Done'].includes(s.setupState);
+  set('setup-toggle', running ? 'Stop' : 'Start');
+  $('#setupsess', el).innerHTML = (s.setupInstruction ? `<div class="warn" style="font-weight:600;margin-bottom:6px">To do: ${esc(s.setupInstruction)}</div>` : '')
+    + `<div class="small ${s.setupStatus ? '' : 'muted'}">${esc(s.setupStatus || 'Drive a run, change one thing, compare. Start it here or from a wheel button.')}</div>`
+    + (s.quietMode ? '<div class="small warn" style="margin-top:6px">Quiet mode on — only important calls.</div>' : '');
 
   const f = s.fuel;
   $('#fuel', el).innerHTML = f ? `<div class="stats">
@@ -204,7 +211,8 @@ const LOAD_STATE = {
 function tyreLoadHtml(t) {
   if (!t || !t.state) return '';
   const [label, cls] = LOAD_STATE[t.state] || [t.state, 'muted'];
-  const warm = t.state === 'cold' && isNum(t.warmPct) ? ` · ${(t.warmPct * 100).toFixed(0)}%` : '';
+  const warm = t.state === 'cold' && isNum(t.warmPct) ? ` · ${(t.warmPct * 100).toFixed(0)}%`
+    : t.state.startsWith('hot') && isNum(t.coolLaps) ? ` · ~${t.coolLaps < 0.75 ? 'half a lap' : t.coolLaps.toFixed(1) + ' laps'} to cool` : '';
   const cell = (n, v) => {
     const pct = isNum(v) ? Math.round(v * 100) : null;
     const c = pct == null ? 'var(--panel3)' : v >= 1.2 ? 'var(--red)' : v >= 1.08 ? '#F5B942' : 'var(--accent)';

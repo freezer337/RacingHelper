@@ -14,6 +14,15 @@ public sealed class OverlayConfig
     public double Opacity { get; set; } = 0.92;
 }
 
+/// <summary>A wheel / button-box button that asks the engineer something (see TelemetryHub.Questions).</summary>
+public sealed class ButtonBinding
+{
+    public string Action { get; set; } = "";
+    public string Device { get; set; } = "";        // stable id, e.g. VID_346E&PID_0006
+    public string DeviceName { get; set; } = "";
+    public int Button { get; set; }
+}
+
 public sealed class AppSettings
 {
     static string Docs => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -42,6 +51,7 @@ public sealed class AppSettings
     public int VoiceVolume { get; set; } = 100;
     public string VoiceName { get; set; } = "";
     public bool CornerCallouts { get; set; }                // speak after each corner where time was lost
+    public bool QuietInCorners { get; set; } = true;        // hold messages until a straight with room to finish them
     public string VoiceOutput { get; set; } = "auto";       // auto (CrewChief when connected, else Windows) | windows | crewchief
 
     // CrewChief V4: we host a local MQTT broker; CrewChief connects to it and speaks our messages
@@ -52,7 +62,10 @@ public sealed class AppSettings
     // car management while driving
     public bool TyreManager { get; set; } = true;           // cold / overheating / push calls from live sliding energy
     public string CoachingMode { get; set; } = "practice";  // practice | always | off — corner tips before the corner
-    public bool LiveSetupAdvice { get; set; } = true;       // practice: setup suggestions from your driving, at the pit stop
+    public bool HotspotWarnings { get; set; } = true;       // "careful at turn 6, you've been off there twice"
+    public bool LiveSetupAdvice { get; set; } = true;       // practice: start a guided setup session automatically
+    public int SetupRunLaps { get; set; } = 5;              // clean laps per setup run
+    public List<ButtonBinding> ButtonBindings { get; set; } = new();
 
     // automation
     public bool AutoImportIbt { get; set; } = true;

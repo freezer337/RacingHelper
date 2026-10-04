@@ -18,6 +18,7 @@ public partial class App : Application
     public WebServer Web { get; private set; } = null!;
     public OverlayManager Overlays { get; private set; } = null!;
     public Voice Voice { get; private set; } = null!;
+    public WheelButtons? Wheel { get; private set; }
     IbtWatcher? _watcher;
     TrayIcon? _tray;
     Hotkeys? _hotkeys;
@@ -70,9 +71,9 @@ public partial class App : Application
             };
 
             Voice = new Voice(() => Settings.Current);
-            Hub.Engineer.Said += m =>
+            Hub.Radio.Released += m =>
             {
-                if (!m.Speak || !Settings.Current.VoiceEnabled) return;
+                if (!Settings.Current.VoiceEnabled) return;
                 if (Hub.CrewChief.TryHandle(m)) return;   // CrewChief connected → it speaks (or already says this itself)
                 Voice.Say(m.Text, m.Priority);
             };
@@ -92,6 +93,22 @@ public partial class App : Application
             _hotkeys.Register(HotkeyIds.ToggleOverlays, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F10, () => Overlays.Hidden = !Overlays.Hidden);
             _hotkeys.Register(HotkeyIds.CycleReference, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F11, CycleReference);
             _hotkeys.Register(HotkeyIds.Dashboard, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F12, ShowDashboard);
+            // questions to the engineer (wheel buttons can be bound to any question in Settings)
+            _hotkeys.Register(HotkeyIds.AskTyres, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F5, () => AskAsync("tyres"));
+            _hotkeys.Register(HotkeyIds.AskFuel, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F6, () => AskAsync("fuel"));
+            _hotkeys.Register(HotkeyIds.AskGaps, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F7, () => AskAsync("gaps"));
+            _hotkeys.Register(HotkeyIds.Repeat, Hotkeys.Ctrl | Hotkeys.Shift, Hotkeys.F8, () => AskAsync("repeat"));
+
+            try
+            {
+                Wheel = new WheelButtons();
+                Wheel.Pressed += p =>
+                {
+                    var b = Settings.Current.ButtonBindings.FirstOrDefault(x => x.Device == p.Device && x.Button == p.Button);
+                    if (b != null) AskAsync(b.Action);
+                };
+            }
+            catch (Exception ex) { Log("Wheel buttons unavailable: " + ex.Message); }
 
             _tray = new TrayIcon(this);
             ShowDashboard();
@@ -125,6 +142,8 @@ public partial class App : Application
         }
     }
 
+    void AskAsync(string question) => Task.Run(() => Hub.Ask(question));
+
     void CycleReference()
     {
         string next = Settings.Current.ReferenceMode switch { "pb" => "session", "session" => "last", _ => "pb" };
@@ -151,6 +170,7 @@ public partial class App : Application
         try
         {
             _hotkeys?.Dispose();
+            Wheel?.Dispose();
             _tray?.Dispose();
             Overlays?.Dispose();
             _watcher?.Dispose();
@@ -176,5 +196,5 @@ public partial class App : Application
 
 static class HotkeyIds
 {
-    public const int ToggleEdit = 1, ToggleOverlays = 2, CycleReference = 3, Dashboard = 4;
+    public const int ToggleEdit = 1, ToggleOverlays = 2, CycleReference = 3, Dashboard = 4, AskTyres = 5, AskFuel = 6, AskGaps = 7, Repeat = 8;
 }

@@ -1,7 +1,7 @@
 import { api, esc, toast, loadSettings, $, $$ } from '../core.js';
 
 export async function render(root) {
-  const [s, voices, status, cc] = await Promise.all([api('/api/settings'), api('/api/voices').catch(() => []), api('/api/status'), api('/api/crewchief').catch(() => null)]);
+  const [s, voices, status, cc, controls] = await Promise.all([api('/api/settings'), api('/api/voices').catch(() => []), api('/api/status'), api('/api/crewchief').catch(() => null), api('/api/controls').catch(() => null)]);
   const sel = (id, opts, val) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   const chk = (id, val, label) => `<label class="check"><input type="checkbox" id="${id}" ${val ? 'checked' : ''}> ${label}</label>`;
   root.innerHTML = `
@@ -11,6 +11,7 @@ export async function render(root) {
         <div class="grid" style="gap:12px">
           ${chk('voiceEnabled', s.voiceEnabled, 'Speak messages')}
           <label class="field">How chatty${sel('voiceVerbosity', [['minimal', 'Minimal — flags, fuel, damage, PBs'], ['normal', 'Normal — plus lap times & biggest loss'], ['detailed', 'Detailed — plus gains and conditions']], s.voiceVerbosity)}</label>
+          ${chk('quietInCorners', s.quietInCorners, 'Only talk on straights (hold messages until there is room to finish them before the next corner)')}
           ${chk('cornerCallouts', s.cornerCallouts, 'Call out each corner where I lose time (immediately after the corner)')}
           <label class="field">Who speaks${sel('voiceOutput', [['auto', 'CrewChief when it is connected, otherwise Windows voice'], ['crewchief', 'Only CrewChief (silent when CrewChief is not running)'], ['windows', 'Always Windows voice']], s.voiceOutput)}</label>
           <label class="field">Windows voice${sel('voiceName', [['', 'Windows default'], ...voices.map(v => [v, v])], s.voiceName)}</label>
@@ -22,7 +23,9 @@ export async function render(root) {
         <div class="grid" style="gap:12px">
           ${chk('tyreManager', s.tyreManager, 'Tyre management: tell me when tyres are cold, overheating (cool them) and when I can push again')}
           <label class="field">Corner coaching <span class="dim">(a short tip before a corner where you keep losing time)</span>${sel('coachingMode', [['practice', 'In practice only'], ['always', 'Practice, qualifying and race'], ['off', 'Off']], s.coachingMode)}</label>
-          ${chk('liveSetupAdvice', s.liveSetupAdvice, 'Practice: work out a setup change from my driving and tell me at the pit stop')}
+          ${chk('hotspotWarnings', s.hotspotWarnings, "Warn me before a corner where I've gone off twice this session")}
+          ${chk('liveSetupAdvice', s.liveSetupAdvice, 'Practice: start a guided setup session automatically (drive a run, change one thing, compare)')}
+          <label class="field">Clean laps per setup run<input type="number" min="3" max="10" id="setupRunLaps" value="${s.setupRunLaps}"></label>
           <p class="small muted" style="margin:0">Every pit stop: the crew's tyre temperature readings are turned into camber and pressure advice. Qualifying: you're told when there's time for another lap.</p>
         </div>
       </div>
@@ -39,6 +42,10 @@ export async function render(root) {
             <li>Save and restart CrewChief. The status above turns green. Racing Helper's messages then come over CrewChief's radio in a TTS voice.</li>
           </ol>
         </div>
+      </div>
+      <div class="card span2"><h2 style="margin-bottom:6px">Wheel buttons & questions</h2>
+        <p class="small muted" style="margin:0 0 12px">Ask the engineer while you drive. Click <b>Bind</b>, then press a button on your wheel or button box (Moza, Fanatec, Simucube… any controller Windows sees). The answer comes straight away, even mid-corner, because you asked for it.${controls?.controllers?.length ? ` Controllers seen so far: ${controls.controllers.map(esc).join(', ')}.` : ''}</p>
+        <div id="controls">${controlsHtml(controls)}</div>
       </div>
       <div class="card"><h2 style="margin-bottom:12px">Delta & analysis</h2>
         <div class="grid" style="gap:12px">
@@ -84,6 +91,20 @@ export async function render(root) {
     toast(r.message);
     refreshCc();
   };
+  const ctl = $('#controls', root);
+  ctl.onclick = async e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const id = b.dataset.id;
+    if (b.dataset.act === 'ask') { const r = await api('/api/ask/' + id, { body: {} }); toast(r.answer || 'Done'); }
+    if (b.dataset.act === 'clear') await api('/api/controls/clear', { body: { action: id } });
+    if (b.dataset.act === 'bind') {
+      b.textContent = 'Press a button…'; b.disabled = true;
+      const r = await api('/api/controls/learn', { body: { action: id } }).catch(() => ({ ok: false, error: 'Failed' }));
+      toast(r.ok ? `Bound to ${r.binding.deviceName} button ${r.binding.button}` : r.error);
+    }
+    ctl.innerHTML = controlsHtml(await api('/api/controls').catch(() => null));
+  };
   async function refreshCc() {
     const el = $('#cc-status', root);
     if (!el || !document.body.contains(el)) return;
@@ -97,6 +118,7 @@ export async function render(root) {
       ...s,
       voiceEnabled: v('voiceEnabled').checked, voiceVerbosity: v('voiceVerbosity').value, cornerCallouts: v('cornerCallouts').checked,
       voiceOutput: v('voiceOutput').value, tyreManager: v('tyreManager').checked, coachingMode: v('coachingMode').value, liveSetupAdvice: v('liveSetupAdvice').checked,
+      quietInCorners: v('quietInCorners').checked, hotspotWarnings: v('hotspotWarnings').checked, setupRunLaps: Math.min(10, Math.max(3, +v('setupRunLaps').value || 5)),
       crewChiefEnabled: v('crewChiefEnabled').checked, crewChiefSkipDuplicates: v('crewChiefSkipDuplicates').checked, crewChiefPort: +v('crewChiefPort').value || 1883,
       voiceName: v('voiceName').value, voiceRate: +v('voiceRate').value, voiceVolume: +v('voiceVolume').value,
       referenceMode: v('referenceMode').value, deltaSectors: v('deltaSectors').value, fuelMarginLaps: +v('fuelMarginLaps').value, myUserId: +v('myUserId').value,
@@ -124,4 +146,18 @@ function ccStatus(cc) {
     : cc.configured ? 'CrewChief is set up to use Racing Helper.'
     : `CrewChief currently points at ${esc(cc.configServer || '?')}:${cc.configPort || '?'} — click Set up CrewChief.`;
   return `<div>${line}</div><div class="small muted" style="margin-top:4px">${cfg}</div>`;
+}
+
+function controlsHtml(c) {
+  if (!c) return '<span class="muted small">Unavailable.</span>';
+  const bound = id => c.bindings.find(b => b.action === id);
+  return `<table><tr><th>Question</th><th>Wheel button</th><th>Keyboard</th><th></th></tr>
+    ${c.questions.map(q => {
+      const b = bound(q.id);
+      return `<tr><td>${esc(q.label)}</td>
+        <td>${b ? `<b>${esc(b.deviceName || b.device)}</b> · button ${b.button}` : '<span class="dim">—</span>'}</td>
+        <td class="small">${q.hotkey ? `<kbd>${esc(q.hotkey).replaceAll('+', '</kbd>+<kbd>')}</kbd>` : ''}</td>
+        <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="small" data-act="bind" data-id="${q.id}">Bind</button>${b ? `<button class="small" data-act="clear" data-id="${q.id}">Clear</button>` : ''}<button class="small" data-act="ask" data-id="${q.id}">Ask now</button></div></td></tr>`;
+    }).join('')}</table>
+    ${c.quiet ? '<p class="small warn" style="margin:8px 0 0">Quiet mode is on: only important calls.</p>' : ''}`;
 }

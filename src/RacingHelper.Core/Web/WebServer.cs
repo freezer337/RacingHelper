@@ -82,6 +82,12 @@ public sealed class WebServer : IAsyncDisposable
 
     static IResult J(object? o) => Results.Json(o, Json);
 
+    /// <summary>Keyboard shortcuts registered by the desktop app for the most used questions.</summary>
+    public static readonly Dictionary<string, string> Hotkeys = new()
+    {
+        ["tyres"] = "Ctrl+Shift+F5", ["fuel"] = "Ctrl+Shift+F6", ["gaps"] = "Ctrl+Shift+F7", ["repeat"] = "Ctrl+Shift+F8",
+    };
+
     void Map(WebApplication app)
     {
         // ---------------- status / live ----------------
@@ -129,6 +135,38 @@ public sealed class WebServer : IAsyncDisposable
             return J(new { ok = true, via = _hub.CrewChief.UseCrewChief ? "crewchief" : "windows" });
         });
         app.MapGet("/api/crewchief", () => J(_hub.CrewChief.Describe()));
+
+        // ---------------- questions & wheel buttons ----------------
+        app.MapPost("/api/ask/{id}", (string id) => J(new { answer = _hub.Ask(id) }));
+        app.MapGet("/api/controls", () => J(new
+        {
+            questions = TelemetryHub.Questions.Select(q => new { q.id, q.label, hotkey = Hotkeys.GetValueOrDefault(q.id) }),
+            bindings = S.ButtonBindings,
+            controllers = _app.Controllers(),
+            quiet = _hub.Radio.Quiet,
+        }));
+        app.MapPost("/api/controls/learn", async (HttpRequest req) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(req.Body, Json) ?? new();
+            var action = body.GetValueOrDefault("action") ?? "";
+            if (!TelemetryHub.Questions.Any(q => q.id == action)) return J(new { ok = false, error = "Unknown action" });
+            var press = await _app.LearnButton(10000);
+            if (press == null) return J(new { ok = false, error = "No button pressed within 10 seconds." });
+            _hub.Settings.Update(s =>
+            {
+                s.ButtonBindings.RemoveAll(b => b.Action == action || (b.Device == press.Device && b.Button == press.Button));
+                s.ButtonBindings.Add(new ButtonBinding { Action = action, Device = press.Device, DeviceName = press.DeviceName, Button = press.Button });
+            });
+            return J(new { ok = true, binding = S.ButtonBindings.First(b => b.Action == action) });
+        });
+        app.MapPost("/api/controls/clear", async (HttpRequest req) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(req.Body, Json) ?? new();
+            var action = body.GetValueOrDefault("action") ?? "";
+            _hub.Settings.Update(s => s.ButtonBindings.RemoveAll(b => b.Action == action));
+            return J(new { ok = true });
+        });
+        app.MapGet("/api/setup-session", () => J(new { state = _hub.SetupEngineer.State.ToString(), status = _hub.SetupEngineer.Status, instruction = _hub.SetupEngineer.Instruction, describe = _hub.SetupEngineer.Describe(), laps = _hub.SetupEngineer.LapsPerRun }));
         app.MapPost("/api/crewchief/configure", () =>
         {
             var (ok, message) = _hub.CrewChief.ConfigureCrewChief();
@@ -337,6 +375,7 @@ public sealed class WebServer : IAsyncDisposable
             if (incoming == null) return Results.BadRequest();
             incoming.Overlays = S.Overlays; // overlays have their own endpoint
             incoming.TyreTargets = S.TyreTargets;
+            incoming.ButtonBindings = S.ButtonBindings;   // bindings have their own endpoints
             bool restartCrewChief = incoming.CrewChiefEnabled != S.CrewChiefEnabled || incoming.CrewChiefPort != S.CrewChiefPort;
             _hub.Settings.Replace(incoming);
             if (restartCrewChief) await _hub.CrewChief.RestartAsync();

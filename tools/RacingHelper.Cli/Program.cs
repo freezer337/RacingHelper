@@ -46,8 +46,12 @@ static async Task ServeCmd(string dbPath, int port)
     hub.Engineer.Said += m =>
     {
         // same routing as the desktop app: CrewChief when connected, otherwise (here) just the console
-        bool cc = m.Speak && hub.CrewChief.TryHandle(m);
-        Console.WriteLine($"  >> [{m.Category}{(cc ? "/crewchief" : "")}] {m.Text}");
+        if (!m.Speak) Console.WriteLine($"  >> [{m.Category}] {m.Text}");
+    };
+    hub.Radio.Released += m =>
+    {
+        bool cc = hub.CrewChief.TryHandle(m);
+        Console.WriteLine($"  >> [{m.Category}{(cc ? "/crewchief" : "/voice")}] {m.Text}");
     };
     hub.Start();
     var watcher = new IbtWatcher(new IbtImporter(store), db, () => settings.Current);
@@ -64,9 +68,17 @@ static void HubCmd(string dbPath, string ibt, double speed)
     settings.Current.DataFolder = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
     settings.Current.CrewChiefEnabled = false;
     if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
+    if (Environment.GetEnvironmentVariable("RH_VERBOSITY") is { Length: > 0 } verb) settings.Current.VoiceVerbosity = verb;
+    if (Environment.GetEnvironmentVariable("RH_RUNLAPS") is { Length: > 0 } rl) settings.Current.SetupRunLaps = int.Parse(rl);
     var store = new SessionStore(new Database(dbPath));
     var hub = new RacingHelper.Live.TelemetryHub(settings, store, new AnalysisService(store));
-    hub.Engineer.Said += m => Console.WriteLine($"  >> [{m.Category}/{m.Priority}{(m.Speak ? "/voice" : "")}] {m.Text}");
+    hub.Engineer.Said += m => { if (!m.Speak) Console.WriteLine($"  >> [{m.Category}/{m.Priority}] {m.Text}"); };
+    hub.Radio.Released += m =>
+    {
+        var st = hub.State;
+        var (inZone, toZone) = RacingHelper.Live.RadioGate.Zone(st.LapDist, st.TrackLength, hub.Model, hub.Reference);
+        Console.WriteLine($"  >> [{m.Category}/{m.Priority}/voice] {m.Text}   (said at {st.LapDist:0} m, {(inZone ? "IN CORNER" : $"{toZone:0} m to next corner")}, waited {(DateTime.Now - m.At).TotalSeconds:0.0}s)");
+    };
     hub.Start();
     hub.StartReplay(ibt, speed);
     var sw = System.Diagnostics.Stopwatch.StartNew();

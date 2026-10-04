@@ -7,7 +7,7 @@ namespace RacingHelper.App.Services;
 public sealed class Hotkeys : IDisposable
 {
     public const uint Alt = 1, Ctrl = 2, Shift = 4, NoRepeat = 0x4000;
-    public const uint F9 = 0x78, F10 = 0x79, F11 = 0x7A, F12 = 0x7B;
+    public const uint F5 = 0x74, F6 = 0x75, F7 = 0x76, F8 = 0x77, F9 = 0x78, F10 = 0x79, F11 = 0x7A, F12 = 0x7B;
     const int WM_HOTKEY = 0x0312;
 
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);

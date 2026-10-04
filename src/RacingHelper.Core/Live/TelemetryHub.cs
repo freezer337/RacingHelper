@@ -22,7 +22,11 @@ public sealed class TelemetryHub : IDisposable
     public TyreManager TyreManager { get; }
     public DrivingCoach Coach { get; }
     public CarManager CarManager { get; }
+    public SetupEngineer SetupEngineer { get; }
+    public Insights Insights { get; }
     public CrewChiefBridge CrewChief { get; }
+    /// <summary>Spoken messages come out here (after waiting for a straight); subscribe to this for voice output.</summary>
+    public RadioGate Radio { get; }
 
     volatile LiveState _state = new();
     public LiveState State => _state;
@@ -80,6 +84,8 @@ public sealed class TelemetryHub : IDisposable
     float _lapFuelStart = float.NaN, _lapStartPct;
     double _prevFrameTime = double.NaN;
     PitStopInfo? _lastStop;
+    LapComparison? _lastCmp;
+    readonly List<double> _recentLaps = new();
 
     // input history ring buffers (~30 Hz, 6 s)
     const int Hist = 180;
@@ -116,8 +122,12 @@ public sealed class TelemetryHub : IDisposable
         TyreManager = new TyreManager(Engineer, () => Settings.Current);
         Coach = new DrivingCoach(Engineer, () => Settings.Current);
         CarManager = new CarManager(Engineer, () => Settings.Current);
+        SetupEngineer = new SetupEngineer(Engineer, () => Settings.Current);
+        Insights = new Insights(Engineer, () => Settings.Current);
         CrewChief = new CrewChiefBridge(() => Settings.Current);
         CrewChief.Log += m => Engineer.Info(m);
+        Radio = new RadioGate(() => Settings.Current);
+        Engineer.Said += m => { if (m.Speak) Radio.Enqueue(m); };
         _source = _live;
         Analysis.MyDriverIdProvider = () => Settings.Current.MyUserId;
 
@@ -178,6 +188,79 @@ public sealed class TelemetryHub : IDisposable
         return ok;
     }
 
+    // ------------------------------------------------------------------ questions from the driver (wheel buttons / hotkeys)
+
+    public static readonly (string id, string label)[] Questions =
+    {
+        ("tyres", "How are my tyres?"),
+        ("fuel", "Fuel: how much, how many laps, do I need to save?"),
+        ("gaps", "Gaps: car ahead / behind and who's catching who"),
+        ("pace", "My pace: last lap and where I lost time"),
+        ("potential", "Where's the time? (my best corners combined)"),
+        ("setup", "Setup session: where are we?"),
+        ("setup-toggle", "Start / stop a setup session"),
+        ("repeat", "Repeat the last message"),
+        ("quiet", "Quiet mode on / off (only important calls)"),
+    };
+
+    /// <summary>Answers a driver question out loud straight away (no waiting for a straight) and returns the text.</summary>
+    public string Ask(string id)
+    {
+        string answer;
+        try { answer = Answer(id); }
+        catch (Exception e) { answer = "Sorry, I couldn't work that out. " + e.Message; }
+        if (id != "repeat" && answer.Length > 0) Engineer.Say(answer, "answer", 2, immediate: true);
+        return answer;
+    }
+
+    string Answer(string id)
+    {
+        var f = _source.Frame;
+        bool driving = _info != null;
+        switch (id)
+        {
+            case "tyres":
+                return TyreManager.Describe();
+            case "fuel":
+                return Insights.DescribeFuel(driving ? ComputeFuel(f) : null);
+            case "gaps":
+                return driving ? Insights.DescribeGaps(_standings, f.PlayerCarIdx, ComputeFuel(f)?.LapsRemaining ?? double.NaN) : "No session running.";
+            case "pace":
+            {
+                if (!double.IsFinite(_lastLap)) return "No lap times yet.";
+                var parts = new List<string> { $"Last lap {RaceEngineer.Speak(_lastLap)}" + (double.IsFinite(_lastLapDelta) ? $", {(_lastLapDelta >= 0 ? "plus" : "minus")} {Math.Abs(_lastLapDelta):0.00} to the reference." : ".") };
+                var top = _lastCmp?.TopLosses.FirstOrDefault();
+                if (top != null) parts.Add($"Most lost at {(top.Name.StartsWith('T') ? "turn " + top.Name[1..] : top.Name)}, {top.TimeDelta:0.00}{(string.IsNullOrEmpty(top.Verdict) ? "" : ", " + top.Verdict)}.");
+                if (_recentLaps.Count >= 3)
+                {
+                    double avg = _recentLaps.Average(), spread = _recentLaps.Max() - _recentLaps.Min();
+                    parts.Add($"Last {_recentLaps.Count} clean laps average {RaceEngineer.Speak(avg)}, spread {spread:0.0}.");
+                }
+                return string.Join(" ", parts);
+            }
+            case "potential":
+                return Insights.DescribePotential();
+            case "setup":
+                return SetupEngineer.Describe();
+            case "setup-toggle":
+                if (SetupEngineer.State is SetupEngineer.Phase.Off or SetupEngineer.Phase.Done) SetupEngineer.Start();
+                else SetupEngineer.Stop();
+                return "";
+            case "repeat":
+            {
+                var last = Radio.Last;
+                if (last == null) { Engineer.Say("Nothing to repeat yet.", "answer", 2, immediate: true); return ""; }
+                Engineer.Say(last.Text, "answer", 2, immediate: true);
+                return last.Text;
+            }
+            case "quiet":
+                Radio.Quiet = !Radio.Quiet;
+                return Radio.Quiet ? "Quiet mode on. Only important calls from now." : "Quiet mode off. Full radio.";
+            default:
+                return "";
+        }
+    }
+
     // ------------------------------------------------------------------ main loop
 
     void Loop()
@@ -207,6 +290,7 @@ public sealed class TelemetryHub : IDisposable
                 _pendingSource = _live;
                 continue;
             }
+            if (st is SourceStatus.Disconnected or SourceStatus.Ended) Radio.Flush(_source.Frame.SessionTime);
             if (st == SourceStatus.Disconnected)
             {
                 if (_tracker.Current != null) _tracker.Flush();
@@ -231,7 +315,11 @@ public sealed class TelemetryHub : IDisposable
                 _tracker.Process(f, _source.WallClock);
                 TyreManager.Update(f, _info.TrackLengthM, dt, f.SessionTime);
                 CarManager.Update(f);
+                Insights.SampleFuel(f);
                 UpdateLiveLap(f);
+                if (!_tracker.CurrentLapIsOut) Insights.Update(f, f.LapDistPct * _info.TrackLengthM, _model, _ref, Coach);
+                var (inZone, toZone) = RadioGate.Zone(f.LapDistPct * _info.TrackLengthM, _info.TrackLengthM, _model, _ref);
+                Radio.Tick(f, f.SessionTime, toZone, inZone);
                 UpdateTrail(f);
                 Watch(f);
                 if ((++_frameCount & 1) == 0) PushHistory(f);
@@ -250,6 +338,7 @@ public sealed class TelemetryHub : IDisposable
         _info = si;
         _tracker.OnSessionInfo(si);
         CarManager.OnSessionInfo(si);
+        SetupEngineer.OnSessionInfo(si);
         _sectorStarts = SectorStarts(si);
         if (carTrackChanged)
         {
@@ -285,6 +374,8 @@ public sealed class TelemetryHub : IDisposable
         _lapCorners.Clear();
         _lastCorner = null;
         _diskLoggingRequested = false;
+        _lastCmp = null;
+        _recentLaps.Clear();
     }
 
     // ------------------------------------------------------------------ reference handling
@@ -334,6 +425,9 @@ public sealed class TelemetryHub : IDisposable
         TyreManager.OnSession(ctx.Info, ctx.SessionType);
         Coach.Reset(ctx.SessionType);
         CarManager.Reset(ctx.Info, ctx.SessionType);
+        SetupEngineer.Reset(ctx.Info, ctx.SessionType);
+        Insights.Reset(ctx.Info, ctx.SessionType);
+        SetupEngineer.OnModel(_model);
         var row = SessionStore.ToRow(ctx, _source.IsLive ? "live" : "ibt");
         Enqueue(() => Store.EnsureSession(ctx, row.Source, _source is IbtSource ibt ? ibt.File.Path : ""));
     }
@@ -359,6 +453,7 @@ public sealed class TelemetryHub : IDisposable
         var stop = _lastStop;
         _lastStop = null;
         TyreManager.OnStintStart(stop?.StationaryTime ?? double.NaN, stop == null || stop.TyresChanged);
+        SetupEngineer.OnStint();
         if (_source.IsLive && Settings.Current.AutoStartDiskTelemetry && f.HasDiskLoggingVar && !f.DiskLoggingEnabled && !_diskLoggingRequested)
         {
             _diskLoggingRequested = true;
@@ -480,7 +575,14 @@ public sealed class TelemetryHub : IDisposable
 
         var fr = _source.Frame;
         TyreManager.OnLap(lap, _sessionBest);
-        CarManager.OnLap(lap, model, lap.SetupHash, fr.SessionTimeRemain, fr.SessionLapsRemainEx);
+        CarManager.OnLap(lap, fr.SessionTimeRemain, fr.SessionLapsRemainEx);
+        SetupEngineer.OnModel(_model);
+        SetupEngineer.OnLap(lap, fr);
+        Insights.OnLap(lap, la);
+        Insights.OnLapGaps(lap.LapNumber, _standings, fr.PlayerCarIdx, fuel?.LapsRemaining ?? double.NaN);
+        Insights.OnLapFuel(lap.LapNumber, fuel, reference, model);
+        _lastCmp = cmp;
+        if (lap.Valid && !lap.OutLap && !lap.InLap) { _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0); }
 
         // damage heuristic: pace after an incident
         if (_incidentLapWatch >= 0 && lap.LapNumber > _incidentLapWatch && lap.Valid)
@@ -823,6 +925,10 @@ public sealed class TelemetryHub : IDisposable
             Messages = Engineer.Recent(),
             TyreLoad = TyreManager.Snapshot(),
             CoachTip = Coach.LastTip,
+            SetupState = SetupEngineer.State.ToString(),
+            SetupStatus = SetupEngineer.Status,
+            SetupInstruction = SetupEngineer.Instruction,
+            QuietMode = Radio.Quiet,
         };
 
         if (_tracker.LapInProgress)
