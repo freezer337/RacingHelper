@@ -1,8 +1,23 @@
+import { suggestionsHtml } from './setup.js';
 import { api, onLive, lapTime, delta, deltaClass, fixed, speed, speedUnit, speedKmh, pressure, pressureUnit, temp, esc, isNum, toast, dateTime, $ } from '../core.js';
 
 let off = null, model = null, modelVersion = -1, mapCanvas = null, lastState = null;
+let suKey = '', suTimer = null;
 
-export function destroy() { off?.(); off = null; }
+export function destroy() { off?.(); off = null; clearTimeout(suTimer); suKey = ''; }
+
+// garage suggestions for the session you're in: fetched again a moment after each lap
+function refreshSuggestions(el, s) {
+  const k = `${s.sessionDbId || 0}:${s.pace?.laps ?? 0}`;
+  if (k === suKey || !s.sessionDbId) return;
+  suKey = k;
+  clearTimeout(suTimer);
+  suTimer = setTimeout(async () => {
+    const r = await api(`/api/setup/auto?session=${s.sessionDbId}`).catch(() => null);
+    const box = $('#setupsugg', el);
+    if (box) box.innerHTML = suggestionsHtml(r, true) + `<div style="margin-top:8px"><a class="small" href="#/pace">All suggestions and pace →</a></div>`;
+  }, 2500);
+}
 
 export async function render(root) {
   root.innerHTML = `<div id="live-root"></div>`;
@@ -11,8 +26,8 @@ export async function render(root) {
   off = onLive(s => {
     lastState = s;
     const m = s.status === 'waiting' ? 'waiting' : 'live';
-    if (m !== mode) { mode = m; m === 'waiting' ? renderWaiting(el) : renderLiveShell(el); }
-    if (m === 'live') update(el, s);
+    if (m !== mode) { mode = m; suKey = ''; m === 'waiting' ? renderWaiting(el) : renderLiveShell(el); }
+    if (m === 'live') { update(el, s); refreshSuggestions(el, s); }
     else updateWaiting(el, s);
   });
 }
@@ -112,6 +127,7 @@ function renderLiveShell(el) {
       <div class="grid" style="align-content:start">
         <div class="card tight"><canvas id="livemap" class="map-canvas"></canvas></div>
         <div class="card"><div class="card-head"><h3 class="grow">Setup session</h3><button class="small" id="setup-toggle">Start</button></div><div id="setupsess"></div></div>
+        <div class="card"><div class="card-head"><h3 class="grow">Setup suggestions</h3><span class="small muted">updates every lap</span></div><div id="setupsugg" class="small muted">After a few clean laps.</div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Fuel</h3><a href="#/fuel" class="small">Planner →</a></div><div id="fuel"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Tyres</h3><a href="#/tyres" class="small">Tyre tool →</a></div><div id="tyreload"></div><div id="tyres"></div></div>
         <div class="card"><div class="card-head"><h3 class="grow">Conditions & car</h3></div><div id="wx"></div></div>

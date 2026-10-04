@@ -141,6 +141,21 @@ public sealed class TyreManagerLive
     public float CoolLaps { get; set; } = float.NaN;    // estimated laps until hot tyres are back to normal
 }
 
+/// <summary>Your pace this session, updated every lap (Live pace page and VR panel).</summary>
+public sealed class PaceLive
+{
+    public double LastLap { get; set; } = double.NaN;
+    public bool LastValid { get; set; }
+    public double Best { get; set; } = double.NaN;             // best clean lap this session
+    public double TheoreticalBest { get; set; } = double.NaN;  // best lap + what your best corners are worth together
+    public double Average { get; set; } = double.NaN;          // last (up to) 5 clean laps
+    public double Spread { get; set; } = double.NaN;           // slowest − fastest of those
+    public double Trend { get; set; } = double.NaN;            // s per lap over the last clean laps (− = getting faster)
+    public int CleanLaps { get; set; }
+    public int Laps { get; set; }
+    public string Focus { get; set; } = "";                    // where most of the theoretical gain is, e.g. "T1 0.24, T3 0.13"
+}
+
 /// <summary>Immutable-by-convention snapshot of everything live, published ~20× per second.</summary>
 public sealed class LiveState
 {
@@ -221,6 +236,7 @@ public sealed class LiveState
     public float TankCapacity { get; set; }
     public List<TyreLive> Tyres { get; set; } = new();
     public TyreManagerLive? TyreLoad { get; set; }
+    public PaceLive? Pace { get; set; }
     public string CoachTip { get; set; } = "";
     public string SetupState { get; set; } = "Off";        // guided setup session: Off / Baseline / WaitChange / Evaluate / Done
     public string SetupStatus { get; set; } = "";

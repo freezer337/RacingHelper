@@ -100,18 +100,7 @@ export async function render(root, params) {
   drawLaps();
 
   // handling
-  const hd = report?.handling;
-  $('#handling', root).innerHTML = hd?.valid ? `
-    <div class="matrix">
-      <div></div><div class="h">Slow</div><div class="h">Medium</div><div class="h">Fast</div>
-      ${['entry', 'mid', 'exit'].map(p => `<div class="h">${p}</div>${['slow', 'medium', 'fast'].map(b => {
-        const c = hd.cells.find(x => x.phase === p && x.speedBand === b);
-        if (!c || c.samples < 60) return `<div class="c dim small">not enough data</div>`;
-        return `<div class="c ${c.tendency}"><b>${c.tendency}</b><div class="tiny muted">US ${c.understeerRate.toFixed(0)}% · OS ${c.oversteerRate.toFixed(0)}%${c.countersteer ? ` · ${c.countersteer} catches` : ''}</div></div>`;
-      }).join('')}`).join('')}
-    </div>
-    <div class="small muted" style="margin-top:10px">${hd.findings.map(esc).join('<br>')}</div>`
-    : '<div class="muted small">Handling analysis needs a few clean laps at the limit.</div>';
+  $('#handling', root).innerHTML = handlingGrid(report?.handling);
 
   drawPace($('#pace', root), $('#pace-legend', root), report, laps);
 
@@ -134,7 +123,7 @@ function mini(label, value, cls = '') {
   return `<div class="stat"><span class="label">${label}</span><span class="value ${cls}" style="font-size:18px">${value}</span></div>`;
 }
 
-function drawPace(canvas, legend, report, laps) {
+export function drawPace(canvas, legend, report, laps) {
   const w = canvas.clientWidth, h = canvas.clientHeight, dpr = devicePixelRatio || 1;
   canvas.width = w * dpr; canvas.height = h * dpr;
   const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -163,4 +152,21 @@ function drawPace(canvas, legend, report, laps) {
     const sum = report.stints.find(x => x.stint === st);
     return `<span><i style="background:${colors[si % colors.length]}"></i>Stint ${st}${sum && isNum(sum.trendPerLap) && sum.validLaps >= 4 ? ` · ${sum.trendPerLap > 0 ? '+' : ''}${sum.trendPerLap.toFixed(2)}s/lap` : ''}${sum && isNum(sum.fuelPerLap) ? ` · ${sum.fuelPerLap.toFixed(2)} L/lap` : ''}</span>`;
   }).join('') + '<span class="muted">hollow = invalid lap</span>';
+}
+
+/** The entry/mid/exit × slow/medium/fast balance grid (Session and Live pace pages). */
+export function handlingGrid(hd) {
+  if (!hd?.valid) return '<div class="muted small">Handling analysis needs a few clean laps at the limit.</div>';
+  return `<div class="matrix">
+      <div></div><div class="h">Slow</div><div class="h">Medium</div><div class="h">Fast</div>
+      ${['entry', 'mid', 'exit'].map(p => `<div class="h">${p}</div>${['slow', 'medium', 'fast'].map(b => {
+        const c = hd.cells.find(x => x.phase === p && x.speedBand === b);
+        if (!c || c.samples < 60) return `<div class="c dim small">not enough data</div>`;
+        const bal = typeof c.balance === 'number' && isFinite(c.balance) ? c.balance : null;
+        const how = bal == null ? '' : bal >= 1 ? `needs ${bal.toFixed(0)}% more lock` : bal <= -1 ? `rotates ${(-bal).toFixed(0)}% more` : 'as normal';
+        return `<div class="c ${c.tendency}"><b>${c.tendency}</b><div class="tiny muted">${how}${c.countersteer ? ` · ${c.countersteer} catches` : ''}</div></div>`;
+      }).join('')}`).join('')}
+    </div>
+    <div class="small muted" style="margin-top:10px">${hd.findings.map(esc).join('<br>')}</div>
+    ${hd.hotSpots?.length ? `<div class="small muted" style="margin-top:6px">Hot spots: ${hd.hotSpots.map(h => `${esc(h.corner)} (${h.kind} on ${h.phase}, ${h.count} laps)`).join(', ')}</div>` : ''}`;
 }

@@ -2,6 +2,7 @@ import { api, icons, onLive, startLive, loadSettings, $, esc, h, toast } from '.
 
 const routes = [
   { path: 'live', label: 'Live', icon: 'live', module: './pages/live.js' },
+  { path: 'pace', label: 'Live pace', icon: 'pace', module: './pages/pace.js' },
   { path: 'sessions', label: 'Sessions', icon: 'sessions', module: './pages/sessions.js' },
   { path: 'session', hidden: true, module: './pages/session.js' },
   { path: 'telemetry', label: 'Telemetry', icon: 'telemetry', module: './pages/telemetry.js' },

@@ -96,6 +96,8 @@ public sealed class TelemetryHub : IDisposable
     PitStopInfo? _lastStop;
     LapComparison? _lastCmp;
     readonly List<double> _recentLaps = new();
+    readonly List<double> _cleanLaps = new();   // every clean lap this session (pace trend)
+    PaceLive? _pace;
 
     // input history ring buffers (~30 Hz, 6 s)
     const int Hist = 180;
@@ -225,6 +227,34 @@ public sealed class TelemetryHub : IDisposable
         ("radio-mode", "Radio mode: auto → practice → qualifying → race"),
         ("radio", "Radio check"),
     };
+
+    PaceLive BuildPace(RecordedLap lap)
+    {
+        var p = new PaceLive { LastLap = lap.LapTime, LastValid = lap.Valid && !lap.OutLap && !lap.InLap, CleanLaps = _cleanLaps.Count, Laps = lap.LapNumber };
+        if (_cleanLaps.Count > 0) p.Best = _cleanLaps.Min();
+        if (_recentLaps.Count >= 3) { p.Average = _recentLaps.Average(); p.Spread = _recentLaps.Max() - _recentLaps.Min(); }
+        // trend: least squares over the last 8 clean laps, leaving out traffic / mistake laps (1.5 s+ off the median)
+        var last = _cleanLaps.TakeLast(8).ToList();
+        if (last.Count >= 4)
+        {
+            double med = last.OrderBy(x => x).ElementAt(last.Count / 2);
+            var pts = last.Select((t, i) => (x: (double)i, y: t)).Where(q => q.y - med < 1.5).ToList();
+            if (pts.Count >= 4)
+            {
+                double mx = pts.Average(q => q.x), my = pts.Average(q => q.y);
+                double sxx = pts.Sum(q => (q.x - mx) * (q.x - mx));
+                if (sxx > 0) p.Trend = pts.Sum(q => (q.x - mx) * (q.y - my)) / sxx;
+            }
+        }
+        try
+        {
+            var (best, gain, top) = Insights.PotentialInfo();
+            if (double.IsFinite(best) && best > 0) p.TheoreticalBest = best - gain;
+            p.Focus = string.Join(", ", top.Select(t => $"{t.name} {t.gain:0.00}"));
+        }
+        catch { }
+        return p;
+    }
 
     /// <summary>New session: on automatic radio, say once when the radio changes character (e.g. practice → qualifying).</summary>
     void SetSessionKind(string kind)
@@ -660,6 +690,8 @@ public sealed class TelemetryHub : IDisposable
         _diskLoggingRequested = false;
         _lastCmp = null;
         _recentLaps.Clear();
+        _cleanLaps.Clear();
+        _pace = null;
     }
 
     // ------------------------------------------------------------------ reference handling
@@ -876,7 +908,12 @@ public sealed class TelemetryHub : IDisposable
         Insights.OnLapGaps(lap.LapNumber, _standings, fr.PlayerCarIdx, fuel?.LapsRemaining ?? double.NaN);
         Insights.OnLapFuel(lap.LapNumber, fuel, reference, model);
         _lastCmp = cmp;
-        if (lap.Valid && !lap.OutLap && !lap.InLap) { _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0); }
+        if (lap.Valid && !lap.OutLap && !lap.InLap)
+        {
+            _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0);
+            _cleanLaps.Add(lap.LapTime);
+        }
+        _pace = BuildPace(lap);
 
         // damage heuristic: pace after an incident
         if (_incidentLapWatch >= 0 && lap.LapNumber > _incidentLapWatch && lap.Valid)
@@ -1219,6 +1256,7 @@ public sealed class TelemetryHub : IDisposable
             TrackModelVersion = model == null ? 0 : (int)(model.SourceLapId % 1_000_000_000) + 1,
             Messages = Engineer.Recent(),
             TyreLoad = TyreManager.Snapshot(),
+            Pace = _pace,
             CoachTip = Coach.LastTip,
             SetupState = SetupEngineer.State.ToString(),
             SetupStatus = SetupEngineer.Status,

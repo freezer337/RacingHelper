@@ -69,6 +69,19 @@ The engineer speaks through Windows voices and also writes everything to the fee
 - **Optional corner callouts** after every corner where you lost time.
 - **Session end:** a debrief summary with what to focus on next time.
 
+### Live pace: your session analysis while you drive
+
+Open **Live pace** in the dashboard (a second monitor, a phone or tablet on `http://<your PC>:5199/#/pace` with "Allow LAN" on, or alt-tab) and keep driving. You don't need to leave the session: it updates a moment after every lap.
+
+- **Last lap, best lap, theoretical best** (all your best corners together, and which corners hold the time), **trend** (s per lap over your last clean laps: getting faster / slower / steady) and the average and spread of your last 5 clean laps.
+- **This lap**, live: delta, predicted lap, sectors and the last corner.
+- **Where your time is:** the corners where you lose the most on average against your own best there, with apex speeds, braking-point spread and lock-ups.
+- **What to work on:** the debrief (consistency, coasting, trail braking, shift points, lock-ups, tyres), updated every lap.
+- **Setup, live:** what to change in the car right now (brake bias, TC, ABS, in-car bars), the setup session and setup sheet, and the garage changes the handling analysis suggests from this session, plus the handling grid. The Live page shows the top three garage suggestions too.
+- Pace chart and the lap table.
+
+When you're not on track it shows your last session.
+
 ### Radio mode: practice, qualifying, race
 
 By default the radio changes with the session (**Settings → Race engineer → Radio mode → Automatic by session**):
@@ -131,6 +144,7 @@ Racing Helper serves a VR panel at `http://127.0.0.1:5199/kneeboard.html`. It's 
 The panel shows:
 - **Change on the car:** the setup session's instruction, the in-car adjustments it suggests, and preset values your setup is missing
 - the setup session progress
+- your pace: last and best lap, the trend, and how much is in your best corners
 - tyre state and load per tyre, with the cool-down estimate
 - fuel and what the pit service will set
 - the last incident and why it happened

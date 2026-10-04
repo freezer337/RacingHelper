@@ -326,6 +326,13 @@ public sealed class Insights
         return (gains.Sum(g => g.gain), gains.Take(2).ToList());
     }
 
+    /// <summary>Best clean lap, what your best corners together are worth on top of it, and the two corners with most of it.</summary>
+    public (double bestLap, double gain, List<(string name, double gain)> top) PotentialInfo()
+    {
+        var (total, top) = Potential();
+        return (_bestLap, total, top);
+    }
+
     public string DescribePotential() => _bestLapSegs == null ? "I need a couple of clean laps to work out your potential." : _potentialText;
 
     // ================================================================== lap hook

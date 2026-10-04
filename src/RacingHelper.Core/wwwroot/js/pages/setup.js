@@ -50,6 +50,18 @@ async function optimiser(el) {
   sync(); run();
 }
 
+/** Suggested garage changes from /api/setup/auto (Setup, Live pace and Live pages). compact: top changes only. */
+export function suggestionsHtml(r, compact = false) {
+  if (!r?.items?.length) return r?.handling?.valid
+    ? '<div class="small muted">No consistent handling problem: the time is in the driving now (see What to work on).</div>'
+    : '<div class="small muted">Needs a few clean laps at the limit (3+).</div>';
+  if (compact) return `<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">${r.items.slice(0, 3).map(it => {
+      const c = it.advice.changes[0];
+      return `<li><div class="small muted">${esc(it.advice.title)}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div><b>${esc(c.parameter)}</b> — ${esc(c.action)}</div>` : ''}</li>`;
+    }).join('')}</ol>`;
+  return r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title)} · ${esc(it.request.phase)} · ${esc(it.request.speed)}</h3>${adviceHtml({ ...it.advice, changes: it.advice.changes.slice(0, 4), drivingTips: it.advice.drivingTips.slice(0, 1), notes: [] })}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">');
+}
+
 function adviceHtml(a) {
   return `
     <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">
@@ -96,7 +108,7 @@ async function auto(el, params) {
           <p class="small muted">Setup: ${esc(r.source)}</p>
         </div>
         <div class="card"><div class="card-head"><h2 class="grow">Suggested changes</h2></div>
-          ${r.items.length ? r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title)} · ${esc(it.request.phase)} · ${esc(it.request.speed)}</h3>${adviceHtml({ ...it.advice, changes: it.advice.changes.slice(0, 4), drivingTips: it.advice.drivingTips.slice(0, 1), notes: [] })}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">')
+          ${r.items.length ? suggestionsHtml(r)
           : '<div class="insight s0"><div class="ttl">No consistent handling problem detected. Work on driving consistency first — see the session debrief.</div></div>'}
         </div>
       </div>`;
