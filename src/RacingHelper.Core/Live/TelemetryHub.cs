@@ -24,6 +24,7 @@ public sealed class TelemetryHub : IDisposable
     public CarManager CarManager { get; }
     public SetupEngineer SetupEngineer { get; }
     public Insights Insights { get; }
+    public InCarAdjuster InCar { get; }
     public CrewChiefBridge CrewChief { get; }
     /// <summary>Spoken messages come out here (after waiting for a straight); subscribe to this for voice output.</summary>
     public RadioGate Radio { get; }
@@ -124,6 +125,8 @@ public sealed class TelemetryHub : IDisposable
         CarManager = new CarManager(Engineer, () => Settings.Current);
         SetupEngineer = new SetupEngineer(Engineer, () => Settings.Current);
         Insights = new Insights(Engineer, () => Settings.Current);
+        InCar = new InCarAdjuster(Engineer, () => Settings.Current, () => _state);
+        SetupEngineer.Adjuster = InCar;
         CrewChief = new CrewChiefBridge(() => Settings.Current);
         CrewChief.Log += m => Engineer.Info(m);
         Radio = new RadioGate(() => Settings.Current);
@@ -199,6 +202,7 @@ public sealed class TelemetryHub : IDisposable
         ("potential", "Where's the time? (my best corners combined)"),
         ("setup", "Setup session: where are we?"),
         ("setup-toggle", "Start / stop a setup session"),
+        ("apply", "Apply the engineer's in-car change (brake bias, TC, ABS, ARB)"),
         ("repeat", "Repeat the last message"),
         ("quiet", "Quiet mode on / off (only important calls)"),
     };
@@ -246,6 +250,8 @@ public sealed class TelemetryHub : IDisposable
                 if (SetupEngineer.State is SetupEngineer.Phase.Off or SetupEngineer.Phase.Done) SetupEngineer.Start();
                 else SetupEngineer.Stop();
                 return "";
+            case "apply":
+                return InCar.ApplyPending();
             case "repeat":
             {
                 var last = Radio.Last;
@@ -929,6 +935,8 @@ public sealed class TelemetryHub : IDisposable
             SetupStatus = SetupEngineer.Status,
             SetupInstruction = SetupEngineer.Instruction,
             QuietMode = Radio.Quiet,
+            InCarValues = new Dictionary<string, float>(f.Dc),
+            PendingAdjust = InCar.Pending == null ? null : $"{InCar.Pending.Adj.Label} {(InCar.Pending.Dir > 0 ? "+" : "−")}{InCar.Pending.Amount:0.##}{(InCar.Pending.ByValue ? "" : " step")}",
         };
 
         if (_tracker.LapInProgress)

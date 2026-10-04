@@ -84,7 +84,12 @@ Verbosity is set in Settings.
   2. It analyses your handling at the limit: "You've got oversteer on exit in medium corners. Box, and in the garage: Rear anti-roll bar, soften one step. It's on 2 now. Then 5 laps."
   3. It notices when you've made the change ("Got it: Rear ArbBlade 2 to 1"), runs 5 more laps and compares pace and balance: "That change works: 0.25 quicker, and the oversteer is down 40 percent. Keep it." If it got worse, it asks you to put it back.
   4. It repeats this for up to four changes.
-  - iRacing doesn't let other apps change your setup, so you make the change in the garage and the app checks it. In fixed-setup sessions it only suggests in-car adjustments (brake bias, TC, ABS) and spots when you change them.
+  - iRacing doesn't let other apps change the garage setup (springs, wing, garage anti-roll bars…). Its chat / pit commands only cover pit service: fuel, tyres, pressures, compound, tear-off, fast repair. So for garage items you make the change and the app checks it. In fixed-setup sessions it only suggests in-car adjustments.
+  - **In-car adjustments can be done for you** (opt-in, Settings → In-car adjustments). That's brake bias, TC, ABS, and anti-roll bars on cars that have them in the cockpit.
+    1. Bind a keyboard key to each control in iRacing (F13–F24 or numpad keys work well) and type the same key in Settings.
+    2. When the setup session suggests one, press **Apply** (bind it to a wheel button).
+    3. The app presses the key and reads the live value back after each press. It stops exactly on target ("Brake bias 57.7 to 57.2") and tells you if a key does nothing or goes the wrong way.
+    - It never changes anything unless you press Apply, and iRacing has to be the active window.
   - It starts on its own in practice, or from the Live page or a wheel button. The run length (3–10 laps) is in Settings.
 - **Every pit stop:** iRacing's crew measures the tyres in the box. Those readings become a short report with camber and pressure advice (inside/outside spread, middle vs edges, front vs rear balance).
 - **Qualifying:** "Time for one more lap after this one" / "This is your last lap. Make it count."
@@ -102,6 +107,7 @@ Bind any question to a button on your wheel or button box in **Settings → Whee
 | My pace | "Last lap 1:31.60, plus 0.29 to the reference. Most lost at turn 4, 0.39, throttle 12 m late. Last 5 clean laps average 1:31.87, spread 1.2." | |
 | Where's the time? | "Your best corners add up to 0.46 quicker than your best lap. Most of it at turn 1, 0.24 and turn 3, 0.13." | |
 | Setup session status, and start/stop | "Testing Rear anti-roll bar: 2 of 5 clean laps done." | |
+| Apply the engineer's in-car change | "Done. Traction control 3 to 4." | |
 | Repeat the last message | | `Ctrl+Shift+F8` |
 | Quiet mode on/off | Only important calls until you switch it back | |
 

@@ -51,6 +51,8 @@ public sealed class Frame
     public float Alt = float.NaN;
     public bool AbsActive;
     public float BrakeBias = float.NaN, TcSetting = float.NaN, AbsSetting = float.NaN;
+    /// <summary>In-car adjustments this car has (dcBrakeBias, dcTractionControl, dcABS, dcAntiRollFront/Rear …).</summary>
+    public readonly Dictionary<string, float> Dc = new();
 
     // engine / fuel
     public float FuelLevel = float.NaN, FuelLevelPct = float.NaN, FuelUsePerHour = float.NaN;
@@ -156,6 +158,11 @@ public sealed class FrameReader
         F("dcBrakeBias", (f, v) => f.BrakeBias = v);
         F("dcTractionControl", (f, v) => f.TcSetting = v);
         F("dcABS", (f, v) => f.AbsSetting = v);
+        foreach (var dc in new[] { "dcBrakeBias", "dcTractionControl", "dcABS", "dcAntiRollFront", "dcAntiRollRear" })
+        {
+            string name = dc;
+            F(name, (f, v) => f.Dc[name] = v);
+        }
 
         F("FuelLevel", (f, v) => f.FuelLevel = v);
         F("FuelLevelPct", (f, v) => f.FuelLevelPct = v);

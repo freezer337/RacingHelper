@@ -66,6 +66,9 @@ public sealed class AppSettings
     public bool LiveSetupAdvice { get; set; } = true;       // practice: start a guided setup session automatically
     public int SetupRunLaps { get; set; } = 5;              // clean laps per setup run
     public List<ButtonBinding> ButtonBindings { get; set; } = new();
+    // in-car adjustments by key press (opt-in): keys you bound in iRacing, by id: bb+ bb- tc+ tc- abs+ abs- arbf+ arbf- arbr+ arbr-
+    public bool InCarAutomation { get; set; }
+    public Dictionary<string, string> InCarKeys { get; set; } = new();
 
     // automation
     public bool AutoImportIbt { get; set; } = true;

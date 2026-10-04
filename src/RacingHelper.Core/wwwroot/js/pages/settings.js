@@ -47,6 +47,14 @@ export async function render(root) {
         <p class="small muted" style="margin:0 0 12px">Ask the engineer while you drive. Click <b>Bind</b>, then press a button on your wheel or button box (Moza, Fanatec, Simucube… any controller Windows sees). The answer comes straight away, even mid-corner, because you asked for it.${controls?.controllers?.length ? ` Controllers seen so far: ${controls.controllers.map(esc).join(', ')}.` : ''}</p>
         <div id="controls">${controlsHtml(controls)}</div>
       </div>
+      <div class="card span2"><h2 style="margin-bottom:6px">In-car adjustments by the engineer</h2>
+        <p class="small muted" style="margin:0 0 10px">iRacing only lets apps change pit service (fuel, tyres, pressures, fast repair), not the garage setup or the wing. What the app <i>can</i> do is press the keys you've bound in iRacing for in-car adjustments. The setup session then makes its brake bias / TC / ABS / in-car anti-roll bar suggestion for you when you press <b>Apply</b> (a wheel button or the Live page). It reads the value back after every press, so it stops on target.</p>
+        ${chk('inCarAutomation', s.inCarAutomation, 'Let the engineer make in-car changes when I press Apply (only then, never on its own)')}
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin-top:10px">
+          ${INCAR.map(([id, label]) => `<label class="field">${label} up<input data-key="${id}+" placeholder="e.g. F13" value="${esc(s.inCarKeys?.[id + '+'] || '')}"></label><label class="field">${label} down<input data-key="${id}-" placeholder="e.g. F14" value="${esc(s.inCarKeys?.[id + '-'] || '')}"></label>`).join('')}
+        </div>
+        <p class="small muted" style="margin:10px 0 0">In iRacing: Options → Controls → bind a <b>keyboard key</b> to each one you use (e.g. "Traction control +"), then type the same key here: <span class="num">F13</span>, <span class="num">NumPad7</span>, <span class="num">T</span> or <span class="num">Ctrl+Shift+T</span>. Keys nobody types while driving (F13–F24, numpad) work best. iRacing has to be the active window.</p>
+      </div>
       <div class="card"><h2 style="margin-bottom:12px">Delta & analysis</h2>
         <div class="grid" style="gap:12px">
           <label class="field">Default delta reference${sel('referenceMode', [['pb', 'Personal best (same conditions)'], ['session', 'Session best'], ['last', 'Last lap'], ['lap', 'Specific lap (chosen in Leaderboards)']], s.referenceMode)}</label>
@@ -118,6 +126,8 @@ export async function render(root) {
       ...s,
       voiceEnabled: v('voiceEnabled').checked, voiceVerbosity: v('voiceVerbosity').value, cornerCallouts: v('cornerCallouts').checked,
       voiceOutput: v('voiceOutput').value, tyreManager: v('tyreManager').checked, coachingMode: v('coachingMode').value, liveSetupAdvice: v('liveSetupAdvice').checked,
+      inCarAutomation: v('inCarAutomation').checked,
+      inCarKeys: Object.fromEntries([...root.querySelectorAll('input[data-key]')].map(i => [i.dataset.key, i.value.trim()]).filter(([, k]) => k)),
       quietInCorners: v('quietInCorners').checked, hotspotWarnings: v('hotspotWarnings').checked, setupRunLaps: Math.min(10, Math.max(3, +v('setupRunLaps').value || 5)),
       crewChiefEnabled: v('crewChiefEnabled').checked, crewChiefSkipDuplicates: v('crewChiefSkipDuplicates').checked, crewChiefPort: +v('crewChiefPort').value || 1883,
       voiceName: v('voiceName').value, voiceRate: +v('voiceRate').value, voiceVolume: +v('voiceVolume').value,
@@ -147,6 +157,8 @@ function ccStatus(cc) {
     : `CrewChief currently points at ${esc(cc.configServer || '?')}:${cc.configPort || '?'} — click Set up CrewChief.`;
   return `<div>${line}</div><div class="small muted" style="margin-top:4px">${cfg}</div>`;
 }
+
+const INCAR = [['bb', 'Brake bias'], ['tc', 'Traction control'], ['abs', 'ABS'], ['arbf', 'Front anti-roll bar'], ['arbr', 'Rear anti-roll bar']];
 
 function controlsHtml(c) {
   if (!c) return '<span class="muted small">Unavailable.</span>';

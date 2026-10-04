@@ -44,6 +44,8 @@ public sealed class SetupEngineer
     bool _autoPending;
 
     public Phase State { get; private set; } = Phase.Off;
+    public InCarAdjuster? Adjuster { get; set; }
+    readonly HashSet<string> _carDc = new();   // in-car adjustments this car has
     public int LapsPerRun => Math.Clamp(_settings().SetupRunLaps, 3, 10);
     public string Status { get; private set; } = "";
     public string? Instruction { get; private set; }
@@ -120,14 +122,15 @@ public sealed class SetupEngineer
     /// <summary>Per lap: in-car adjustments count as a setup change too.</summary>
     public void OnLap(RecordedLap lap, Frame f)
     {
-        string inCar = $"{Fmt(f.BrakeBias)}|{Fmt(f.TcSetting)}|{Fmt(f.AbsSetting)}";
+        foreach (var k in f.Dc.Keys) _carDc.Add(k);
+        var adj = InCarAdjuster.All;
+        string inCar = string.Join("|", adj.Select(a => f.Dc.TryGetValue(a.Var, out var v) ? Fmt(v) : "-"));
         if (_inCar == "") _inCar = inCar;
         else if (inCar != _inCar)
         {
             var parts = new List<string>(); var keys = new List<string>();
             var o = _inCar.Split('|'); var n = inCar.Split('|');
-            string[] names = { "Brake bias", "Traction control", "ABS" };
-            for (int i = 0; i < 3; i++) if (o[i] != n[i]) { parts.Add($"{names[i]} {o[i]} to {n[i]}"); keys.Add(names[i]); }
+            for (int i = 0; i < adj.Length; i++) if (o[i] != n[i]) { parts.Add($"{adj[i].Label} {o[i]} to {n[i]}"); keys.Add(adj[i].Param); }
             _inCar = inCar;
             SetupChanged(parts, keys);
         }
@@ -170,6 +173,7 @@ public sealed class SetupEngineer
         }
         else if (State == Phase.WaitChange && _change != null)
         {
+            if (Adjuster != null) Adjuster.Pending = null;
             bool expected = keys.Any(k => SetupOptimiser.Matches(_change.Parameter, k));
             _test = NewRun(_change.Parameter);
             State = Phase.Evaluate;
@@ -217,8 +221,14 @@ public sealed class SetupEngineer
         string now = change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
         State = Phase.WaitChange;
         Instruction = $"{change.Parameter}: {change.Action}";
+        string offer = "";
+        if (Adjuster != null && InCarAdjuster.ForParam(change.Parameter) is { } a && _carDc.Contains(a.Var) && InCarAdjuster.Parse(a, change.Action) is { } how)
+        {
+            Adjuster.Pending = new InCarAdjuster.Request(a, how.dir, how.amount, how.byValue, where);
+            if (Adjuster.CanApply(a, how.dir)) offer = " Press Apply and I'll do it for you.";
+        }
         Say(InCar(change.Parameter)
-            ? $"{intro}You've got {where}. Change it in the car: {change.Parameter}, {change.Action}.{now} I'll see it when you do."
+            ? $"{intro}You've got {where}. Change it in the car: {change.Parameter}, {change.Action}.{now}{offer} I'll see it when you do."
             : $"{intro}You've got {where}. Box, and in the garage: {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.", 2);
     }
 
@@ -271,7 +281,8 @@ public sealed class SetupEngineer
 
     // ------------------------------------------------------------------ helpers
 
-    static bool InCar(string param) => param is "Brake bias" or "Traction control" or "ABS";
+    bool InCar(string param) => param is "Brake bias" or "Traction control" or "ABS"
+        || (InCarAdjuster.ForParam(param) is { } a && _carDc.Contains(a.Var));   // e.g. in-car anti-roll bars
 
     static string Hash(SessionInfo si)
     {
