@@ -69,7 +69,17 @@ The engineer speaks through Windows voices and also writes everything to the fee
 - **Optional corner callouts** after every corner where you lost time.
 - **Session end:** a debrief summary with what to focus on next time.
 
-Verbosity is set in Settings.
+### Radio mode: practice, qualifying, race
+
+By default the radio changes with the session (**Settings → Race engineer → Radio mode → Automatic by session**):
+
+| Session | What you hear |
+|---|---|
+| **Practice** | Lots of info: lap times and deltas, the corner where you lost the most and the ones where you gained, conditions, setup-session and in-car advice, tyre calls, corner coaching. |
+| **Qualifying** | Half silent: "Out lap, get heat into the tyres", "Tyres are in. Push now.", tyre overheating, the corner where you lost the most, corner tips, crash analysis, "time for one more lap", and anything urgent. No lap times, setup chatter or general info. |
+| **Race** | The normal race radio (as before). |
+
+When a new session starts on automatic, the engineer says once which radio it's on ("Qualifying radio. Half silent…"). You can also fix it to one mode in Settings (or Minimal: flags, fuel, damage, PBs), or cycle it while driving with the **Radio mode** button/key (`Ctrl+Shift+F4`): automatic → practice → qualifying → race → automatic. The current mode shows on the Live page and the VR panel. Answers to your own questions always come through, in every mode.
 
 ### Managing the car while you drive
 
@@ -155,6 +165,8 @@ Bind any question to a button on your wheel or button box in **Settings → Whee
 | What will you set at my pit stop? | "When you box I'll set: 7 litres, four tyres at 176, 177, 171, 172 kPa, tear-off." | |
 | Repeat the last message | | `Ctrl+Shift+F8` |
 | Quiet mode on/off | Only important calls until you switch it back | |
+| Radio mode | "Qualifying radio. Half silent. Only tyre warm-up, when to push, and where you're losing time." | `Ctrl+Shift+F4` |
+| Radio check | "Radio check, loud and clear through CrewChief. Automatic radio, race right now." | `Ctrl+Shift+F3` |
 
 ### More calls you don't get from iRacing
 
@@ -173,11 +185,15 @@ If you use [CrewChief](https://thecrewchief.org/), it can speak Racing Helper's 
    - tick **MQTT Telemetry enabled**
    - type any **MQTT drivername**
    - leave text-to-speech on (anything but "Never")
-3. Save and restart CrewChief. The status in Settings turns green: "Connected as …".
+3. Save and restart CrewChief, and press **Start Application** in CrewChief. The status in Settings turns green: "Connected as …".
+4. Get in the car and do a radio check (Settings button, or your bound key/button). You hear it in CrewChief's TTS voice.
+
+**CrewChief only talks while you're in a session.** It drops messages that arrive while you're in the menus, while it isn't started, or before the session is running. Racing Helper sees whether CrewChief is live (it only sends its telemetry then), so outside a session the radio check, and everything else, comes on the Windows voice instead, and the status line says "CrewChief takes over once you're in a session". That's why a radio check from the dashboard in the menus isn't heard on CrewChief: press it again from the car.
 
 Details:
 
-- With **Who speaks = auto** (the default), messages go to CrewChief whenever it's connected; otherwise the Windows voice speaks them.
+- With **Who speaks = auto** (the default), messages go to CrewChief whenever it's connected and in a session; otherwise the Windows voice speaks them.
+- Nothing from CrewChief at all, even on track? Check CrewChief → Properties → text-to-speech isn't "Never". CrewChief prefers a male Windows voice (e.g. Microsoft David); with only another voice installed it uses that one.
 - Things CrewChief already says itself (flags, fuel, lap times, PBs, incidents, damage) aren't sent twice. They still appear in the feed.
 - Corner tips are sent with a distance window, so CrewChief drops a tip rather than play it after the braking point.
 - CrewChief reads these messages with a Windows TTS voice, not Jim's recorded voice; his recordings only cover CrewChief's own phrases.

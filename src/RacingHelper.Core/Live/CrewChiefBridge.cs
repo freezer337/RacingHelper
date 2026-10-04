@@ -37,7 +37,14 @@ public sealed class CrewChiefBridge : IDisposable
     public string Error { get; private set; } = "";
     public string DriverName => _subscribers.Values.Select(t => t[(SubscribeTopic.Length + 1)..]).FirstOrDefault() ?? "";
     public bool Connected => !_subscribers.IsEmpty;
-    public bool ReceivingTelemetry => (DateTime.UtcNow - _lastTelemetry).TotalSeconds < 10;
+    /// <summary>
+    /// CrewChief only publishes telemetry while it's started and in a live session phase (practice/quali/race on track,
+    /// formation, countdown…) — exactly when it will play our messages. In menus or with "Start Application" not pressed it
+    /// silently drops them, so then the Windows voice speaks instead.
+    /// </summary>
+    public bool ReceivingTelemetry => (DateTime.UtcNow - _lastTelemetry).TotalSeconds < 15;
+    /// <summary>Connected and in a session, so a message sent now will be heard.</summary>
+    public bool Live => Connected && ReceivingTelemetry;
     public int Port => _port;
     public int Sent { get; private set; }
 
@@ -74,7 +81,9 @@ public sealed class CrewChiefBridge : IDisposable
             };
             _server.InterceptingPublishAsync += e =>
             {
-                if (e.ApplicationMessage.Topic?.StartsWith(TelemetryTopic + "/", StringComparison.Ordinal) == true) _lastTelemetry = DateTime.UtcNow;
+                // anything CrewChief publishes (its telemetry topic may have been renamed) — not our own /coach messages
+                var t = e.ApplicationMessage.Topic ?? "";
+                if (e.ClientId != "RacingHelper" && !t.StartsWith(SubscribeTopic, StringComparison.Ordinal)) _lastTelemetry = DateTime.UtcNow;
                 return Task.CompletedTask;
             };
             _server.ClientDisconnectedAsync += e =>
@@ -123,7 +132,7 @@ public sealed class CrewChiefBridge : IDisposable
     {
         "windows" => false,
         "crewchief" => _server != null,
-        _ => Connected,
+        _ => Live,
     };
 
     /// <summary>
@@ -134,11 +143,11 @@ public sealed class CrewChiefBridge : IDisposable
     {
         if (!UseCrewChief) return false;
         if (_settings().CrewChiefSkipDuplicates && Duplicates.Contains(m.Category)) return true;
-        Send(m.Text, m.Priority, m.LapDist, m.ValidUntil);
+        Send(m.Text, m.Priority, m.LapDist, m.ValidUntil, m.Immediate);
         return true;
     }
 
-    public void Send(string text, int priority, float lapDist = float.NaN, float validUntil = float.NaN)
+    public void Send(string text, int priority, float lapDist = float.NaN, float validUntil = float.NaN, bool immediate = false)
     {
         var srv = _server;
         if (srv == null || _subscribers.IsEmpty) return;
@@ -148,7 +157,7 @@ public sealed class CrewChiefBridge : IDisposable
             // CrewChief: 0 lowest, 5 default, 10 spotter. Higher = inserted nearer the head of its queue.
             ["priority"] = priority switch { <= 0 => 3, 1 => 5, 2 => 7, _ => 9 },
         };
-        if (priority >= 3) payload["immediate"] = true;
+        if (priority >= 3 || immediate) payload["immediate"] = true;
         if (float.IsFinite(lapDist) && float.IsFinite(validUntil) && validUntil > lapDist)
         {
             // only play it between here and the braking point; dropped if CrewChief is busy until then
@@ -252,6 +261,7 @@ public sealed class CrewChiefBridge : IDisposable
             connected = Connected,
             driverName = DriverName,
             receivingTelemetry = ReceivingTelemetry,
+            live = Live,
             usingCrewChief = UseCrewChief,
             sent = Sent,
             configPath = ConfigPath,

@@ -127,6 +127,7 @@ public sealed class EngineerMessage
     public float LapDist { get; set; } = float.NaN;     // where it was said (m); with ValidUntil: drop it if it can't be heard before then
     public float ValidUntil { get; set; } = float.NaN;  // lap distance (m) after which a coaching tip is useless
     public bool Immediate { get; set; }                 // answers to the driver's own questions: no waiting for a straight
+    public string Key { get; set; } = "";               // dedupe key it was said with (e.g. "quali-one-more")
 }
 
 public sealed class TyreManagerLive
@@ -225,6 +226,8 @@ public sealed class LiveState
     public string SetupStatus { get; set; } = "";
     public string? SetupInstruction { get; set; }
     public bool QuietMode { get; set; }
+    public string RadioMode { get; set; } = "auto";   // setting: auto | practice | quali | race | minimal
+    public string RadioProfile { get; set; } = "";    // in use now: practice | quali | race | minimal
     public string LastCrash { get; set; } = "";
     public string CarAdvice { get; set; } = "";       // in-car adjustments the engineer suggests right now
     public string PitPlan { get; set; } = "";         // what the automatic pit service would set

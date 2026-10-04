@@ -22,6 +22,8 @@ public sealed class RadioGate
     /// <summary>Quiet mode: only important calls (priority 2+) and answers to your questions.</summary>
     public bool Quiet { get; set; }
     public int Waiting { get { lock (_lock) return _queue.Count; } }
+    /// <summary>The radio profile in use (practice / quali / race / minimal), see RaceEngineer.Profile.</summary>
+    public Func<string> Profile { get; set; } = () => "race";
 
     public RadioGate(Func<AppSettings> settings) { _settings = settings; }
 
@@ -30,6 +32,7 @@ public sealed class RadioGate
     public void Enqueue(EngineerMessage m)
     {
         if (Quiet && m.Priority < 2 && !m.Immediate) return;
+        if (Profile() == "quali" && !QualiAllows(m)) return;
         bool now = !_settings().QuietInCorners || m.Priority >= 3 || m.Immediate || float.IsFinite(m.ValidUntil);
         if (now) { Send(m); return; }
         lock (_lock) _queue.Add((m, _now));
@@ -41,6 +44,14 @@ public sealed class RadioGate
         if (m.Category != "answer") Last = m;
         Released?.Invoke(m);
     }
+
+    /// <summary>
+    /// Qualifying radio is half silent: tyre warm-up / "push now" / overheating, where you're losing time (corner losses,
+    /// coaching, crash analysis), "time for one more lap", anything urgent, and answers to your own questions. No lap
+    /// times, setup chatter, gaps or general info.
+    /// </summary>
+    public static bool QualiAllows(EngineerMessage m) =>
+        m.Immediate || m.Priority >= 2 || m.Category is "tyres" or "corner" or "coach" or "incident" || m.Key == "quali-one-more";
 
     /// <summary>Not driving (in the pits, sim closed, replay paused): everything can be said now.</summary>
     public void Flush(double now)

@@ -77,7 +77,8 @@
 
   function render(s) {
     $('title').textContent = s.car || 'Racing Helper';
-    $('session').textContent = s.status === 'waiting' ? 'waiting for iRacing' : [s.track, s.sessionType].filter(Boolean).join(' · ');
+    const radio = { practice: 'practice radio', quali: 'quali radio', race: 'race radio', minimal: 'minimal radio' }[s.radioProfile] || '';
+    $('session').textContent = s.status === 'waiting' ? 'waiting for iRacing' : [s.track, s.sessionType, radio].filter(Boolean).join(' · ');
 
     // everything that asks you to change something on the car, in one place
     const todo = [];

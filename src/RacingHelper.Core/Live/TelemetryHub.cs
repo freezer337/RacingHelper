@@ -143,7 +143,7 @@ public sealed class TelemetryHub : IDisposable
         CarManager.InBox += OnInBox;
         CrewChief = new CrewChiefBridge(() => Settings.Current);
         CrewChief.Log += m => Engineer.Info(m);
-        Radio = new RadioGate(() => Settings.Current);
+        Radio = new RadioGate(() => Settings.Current) { Profile = () => Engineer.Profile };
         Engineer.Said += m => { if (m.Speak) Radio.Enqueue(m); };
         _source = _live;
         Analysis.MyDriverIdProvider = () => Settings.Current.MyUserId;
@@ -222,7 +222,32 @@ public sealed class TelemetryHub : IDisposable
         ("crash", "Why did I crash?"),
         ("repeat", "Repeat the last message"),
         ("quiet", "Quiet mode on / off (only important calls)"),
+        ("radio-mode", "Radio mode: auto → practice → qualifying → race"),
+        ("radio", "Radio check"),
     };
+
+    /// <summary>New session: on automatic radio, say once when the radio changes character (e.g. practice → qualifying).</summary>
+    void SetSessionKind(string kind)
+    {
+        string before = Engineer.Profile;
+        Engineer.SessionKind = kind;
+        string after = Engineer.Profile;
+        if (Settings.Current.RadioMode == "auto" && after != before)
+            Engineer.Say($"{(after == "quali" ? "Qualifying" : after == "race" ? "Race" : "Practice")} radio. {RaceEngineer.ProfileText(after)}.", "info", 1, "radio-profile", 30);
+    }
+
+    /// <summary>Radio check: says which voice it came through, and why CrewChief isn't the one talking when it isn't.</summary>
+    public string RadioCheck()
+    {
+        var s = Settings.Current;
+        string via = CrewChief.UseCrewChief ? "through CrewChief" : "on the Windows voice";
+        string mode = $" {Cap(RaceEngineer.ModeName(s.RadioMode))}{(s.RadioMode == "auto" ? ", " + Engineer.Profile switch { "quali" => "qualifying", "race" => "race", _ => "practice" } + " right now" : "")}.";
+        if (CrewChief.Connected && !CrewChief.Live && s.VoiceOutput != "windows")
+            return $"Radio check, loud and clear {via}.{mode} CrewChief is connected, but it only talks once you're in a session on track, so you'll hear it there.";
+        return $"Radio check, loud and clear {via}.{mode}";
+    }
+
+    static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>Answers a driver question out loud straight away (no waiting for a straight) and returns the text.</summary>
     public string Ask(string id)
@@ -281,6 +306,18 @@ public sealed class TelemetryHub : IDisposable
                 if (last == null) { Engineer.Say("Nothing to repeat yet.", "answer", 2, immediate: true); return ""; }
                 Engineer.Say(last.Text, "answer", 2, immediate: true);
                 return last.Text;
+            }
+            case "radio":
+                return RadioCheck();
+            case "radio-mode":
+            {
+                var modes = new[] { "auto", "practice", "quali", "race" };
+                int i = Array.IndexOf(modes, Settings.Current.RadioMode);
+                string next = modes[(i + 1) % modes.Length];
+                Settings.Update(x => x.RadioMode = next);
+                return next == "auto"
+                    ? $"Automatic radio, {(Engineer.SessionKind == "quali" ? "qualifying" : Engineer.SessionKind)} right now. {RaceEngineer.ProfileText(Engineer.Profile)}."
+                    : $"{Cap(RaceEngineer.ModeName(next))}. {RaceEngineer.ProfileText(next)}.";
             }
             case "quiet":
                 Radio.Quiet = !Radio.Quiet;
@@ -670,6 +707,7 @@ public sealed class TelemetryHub : IDisposable
     {
         ResetSessionState();
         TyreManager.OnSession(ctx.Info, ctx.SessionType);
+        SetSessionKind(TyreManager.Kind(ctx.SessionType));
         Coach.Reset(ctx.SessionType);
         CarManager.Reset(ctx.Info, ctx.SessionType);
         SetupEngineer.Reset(ctx.Info, ctx.SessionType);
@@ -1186,6 +1224,8 @@ public sealed class TelemetryHub : IDisposable
             SetupStatus = SetupEngineer.Status,
             SetupInstruction = SetupEngineer.Instruction,
             QuietMode = Radio.Quiet,
+            RadioMode = Settings.Current.RadioMode,
+            RadioProfile = Engineer.Profile,
             LastCrash = Crash.Last?.Summary ?? "",
             CarAdvice = InCarAdvisor.Current.Count > 0 ? "Car adjustments: " + InCarAdjustments.Join(InCarAdvisor.Current) : "",
             PitPlan = _pitPlanText,

@@ -137,9 +137,13 @@ public sealed class WebServer : IAsyncDisposable
         app.MapGet("/api/engineer", () => J(_hub.Engineer.Recent(50)));
         app.MapPost("/api/engineer/test", () =>
         {
-            const string text = "Radio check. Racing Helper, loud and clear.";
-            if (_hub.CrewChief.UseCrewChief) _hub.CrewChief.Send(text, 2); else _app.Speak(text);
-            return J(new { ok = true, via = _hub.CrewChief.UseCrewChief ? "crewchief" : "windows" });
+            // CrewChief drops messages outside a live session (menus, garage before the session runs, app not started),
+            // so then this goes out on the Windows voice and the text says why
+            var cc = _hub.CrewChief;
+            bool viaCc = cc.UseCrewChief;
+            string text = _hub.RadioCheck();
+            if (viaCc) cc.Send(text, 2, immediate: true); else _app.Speak(text);
+            return J(new { ok = true, via = viaCc ? "crewchief" : "windows", text, crewChiefConnected = cc.Connected, crewChiefLive = cc.Live });
         });
         app.MapGet("/api/crewchief", () => J(_hub.CrewChief.Describe()));
 

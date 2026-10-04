@@ -68,7 +68,7 @@ static void HubCmd(string dbPath, string ibt, double speed)
     settings.Current.DataFolder = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
     settings.Current.CrewChiefEnabled = false;
     if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
-    if (Environment.GetEnvironmentVariable("RH_VERBOSITY") is { Length: > 0 } verb) settings.Current.VoiceVerbosity = verb;
+    if (Environment.GetEnvironmentVariable("RH_RADIO") is { Length: > 0 } radio) settings.Current.RadioMode = radio;
     if (Environment.GetEnvironmentVariable("RH_RUNLAPS") is { Length: > 0 } rl) settings.Current.SetupRunLaps = int.Parse(rl);
     var store = new SessionStore(new Database(dbPath));
     var hub = new RacingHelper.Live.TelemetryHub(settings, store, new AnalysisService(store));

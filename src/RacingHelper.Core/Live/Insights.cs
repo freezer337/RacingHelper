@@ -18,7 +18,7 @@ public sealed class Insights
     readonly Func<AppSettings> _settings;
     string _kind = "practice";
     SessionInfo? _si;
-    int Verbosity => _settings().VoiceVerbosity switch { "minimal" => 0, "detailed" => 2, _ => 1 };
+    int Verbosity => _eng.Verbosity;
 
     public Insights(RaceEngineer engineer, Func<AppSettings> settings)
     {

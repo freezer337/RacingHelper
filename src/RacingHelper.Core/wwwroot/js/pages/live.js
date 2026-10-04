@@ -179,6 +179,7 @@ function update(el, s) {
     + `<div class="small ${s.setupStatus ? '' : 'muted'}">${esc(s.setupStatus || 'Drive a run, change one thing, compare. Start it here or from a wheel button.')}</div>`
     + (s.setupSheet?.length ? `<div class="small" style="margin-top:8px"><b>Setup sheet</b><ul style="margin:4px 0 0 18px;padding:0">${s.setupSheet.map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '')
     + (s.lastCrash ? `<div class="small bad" style="margin-top:8px"><b>Last incident:</b> ${esc(s.lastCrash)}</div>` : '')
+    + (s.radioProfile ? `<div class="small muted" style="margin-top:6px">${esc(radioLabel(s))}</div>` : '')
     + (s.quietMode ? '<div class="small warn" style="margin-top:6px">Quiet mode on — only important calls.</div>' : '');
 
   const f = s.fuel;
@@ -267,4 +268,9 @@ function drawMap(s) {
     ctx.fillStyle = car.isPlayer ? '#22D37E' : car.inPit ? '#4A5262' : car.classColor;
     ctx.fill(); ctx.lineWidth = car.isPlayer ? 2 : 1; ctx.strokeStyle = car.isPlayer ? '#fff' : '#0B0E13'; ctx.stroke();
   }
+}
+
+function radioLabel(s) {
+  const name = { practice: 'Practice radio: lots of info', quali: 'Qualifying radio: half silent (tyres, push, where you lose time)', race: 'Race radio', minimal: 'Minimal radio' }[s.radioProfile] || 'Radio';
+  return name + (s.radioMode === 'auto' ? ' · automatic by session' : ' · fixed in Settings / radio mode button');
 }
