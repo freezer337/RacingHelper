@@ -18,7 +18,7 @@ public sealed class Insights
     readonly Func<AppSettings> _settings;
     string _kind = "practice";
     SessionInfo? _si;
-    int Verbosity => _settings().VoiceVerbosity switch { "minimal" => 0, "detailed" => 2, _ => 1 };
+    int Verbosity => _eng.Verbosity;
 
     public Insights(RaceEngineer engineer, Func<AppSettings> settings)
     {
@@ -324,6 +324,13 @@ public sealed class Insights
                          .Select(kv => (name: kv.Value.name, gain: (double)Math.Max(0, _bestLapSegs[kv.Key] - kv.Value.best)))
                          .Where(g => g.gain > 0.01).OrderByDescending(g => g.gain).ToList();
         return (gains.Sum(g => g.gain), gains.Take(2).ToList());
+    }
+
+    /// <summary>Best clean lap, what your best corners together are worth on top of it, and the two corners with most of it.</summary>
+    public (double bestLap, double gain, List<(string name, double gain)> top) PotentialInfo()
+    {
+        var (total, top) = Potential();
+        return (_bestLap, total, top);
     }
 
     public string DescribePotential() => _bestLapSegs == null ? "I need a couple of clean laps to work out your potential." : _potentialText;

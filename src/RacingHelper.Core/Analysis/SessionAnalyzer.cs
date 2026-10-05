@@ -38,6 +38,8 @@ public sealed class CornerInsight
     public float BrakePointSpread { get; set; }   // std dev of braking point (m) — consistency
     public CornerComparison? VsReference { get; set; }
     public int Lockups { get; set; }
+    public int LockupsFront { get; set; }
+    public int LockupsRear { get; set; }
 }
 
 public sealed class SessionReport
@@ -163,6 +165,8 @@ public static class SessionAnalyzer
                     MinSpeedBest = ms.Max(x => x!.MinSpeed) * 3.6f,
                     MinSpeedAvg = ms.Average(x => x!.MinSpeed) * 3.6f,
                     Lockups = ms.Count(x => x!.LockupFront || x.LockupRear),
+                    LockupsFront = ms.Count(x => x!.LockupFront),
+                    LockupsRear = ms.Count(x => x!.LockupRear),
                 };
                 ci.AvgLossToBest = ci.AvgTime - ci.BestTime;
                 var bps = ms.Where(x => float.IsFinite(x!.BrakePoint)).Select(x => (double)x!.BrakePoint).ToList();

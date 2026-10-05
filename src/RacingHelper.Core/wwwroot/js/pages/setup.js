@@ -50,17 +50,33 @@ async function optimiser(el) {
   sync(); run();
 }
 
+/** Suggested garage changes from /api/setup/auto (Setup, Live pace and Live pages). compact: top changes only. */
+export function suggestionsHtml(r, compact = false) {
+  if (!r?.items?.length) return r?.handling?.valid
+    ? `<div class="small muted">${r.fixedSetup ? 'Fixed setup, and nothing on the in-car dials would help' : 'Nothing this car can change would help'}: the time is in the driving now (see What to work on).</div>`
+    : '<div class="small muted">Needs a few clean laps at the limit (3+).</div>';
+  if (compact) return `<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">${r.items.slice(0, 3).map(it => {
+      const c = it.advice.changes[0];
+      return `<li><div class="small muted">${esc(it.advice.title.split(' — ')[0])}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div>${changeLine(c)}</div>` : ''}</li>`;
+    }).join('')}</ol>`;
+  return r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title.split(' — ')[0])}${it.request.phase && it.request.phase !== 'all' ? ' · ' + esc(it.request.phase) : ''}${it.request.speed && it.request.speed !== 'all' ? ' · ' + esc(it.request.speed) + ' corners' : ''}</h3>${adviceHtml(it.advice)}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">');
+}
+
+/** One line per change: the garage field, current → new, how many clicks. Nothing else. */
+export function changeLine(c) {
+  const tag = c.inCar ? ' <span class="tag blue">in the car</span>' : '';
+  return c.target
+    ? `<b>${esc(c.target)}</b>${c.step ? ` <span class="muted small">${esc(c.step)}</span>` : ''}${tag}`
+    : `<b>${esc(c.parameter)}</b>: ${esc(c.action)}${tag}`;
+}
+
 function adviceHtml(a) {
+  if (!a.changes.length) return `<div class="muted">${a.fixedSetup ? 'Fixed setup: the garage is locked and this car has no in-car dial that helps with this.' : 'Nothing this car can adjust helps with this.'} Work on the driving first.</div>`;
   return `
-    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">
-      ${a.changes.slice(0, 8).map((c, i) => `<li ${i > 3 ? 'class="muted"' : ''}>
-        <div><b>${esc(c.parameter)}</b> — ${esc(c.action)} <span class="tag ${i < 3 ? 'green' : ''}">${i < 3 ? 'try first' : esc(c.area)}</span></div>
-        <div class="small muted">${esc(c.why)} · ${esc(c.amount)}</div>
-        ${c.current.length ? `<div class="tiny" style="margin-top:3px">Current: <span class="num">${c.current.map(esc).join(' · ')}</span></div>` : ''}
-      </li>`).join('')}
+    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">
+      ${a.changes.slice(0, 4).map(c => `<li>${changeLine(c)}</li>`).join('')}
     </ol>
-    ${a.drivingTips.length ? `<h3 style="margin-top:18px">Driving technique first</h3><ul class="steps">${a.drivingTips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-    <p class="small muted">${a.notes.map(esc).join(' ')}</p>`;
+    ${a.notAdjustable?.length ? `<p class="small muted" style="margin:8px 0 0">Not adjustable on this car: ${a.notAdjustable.map(esc).join(', ')}.</p>` : ''}`;
 }
 
 // ---------------------------------------------------------------- auto from telemetry
@@ -84,16 +100,19 @@ async function auto(el, params) {
             <div></div><div class="h">Slow</div><div class="h">Medium</div><div class="h">Fast</div>
             ${['entry', 'mid', 'exit'].map(p => `<div class="h">${p}</div>${['slow', 'medium', 'fast'].map(b => {
               const c = hd.cells.find(x => x.phase === p && x.speedBand === b);
-              if (!c || c.samples < 60) return `<div class="c dim small">little data</div>`;
-              return `<div class="c ${c.tendency}"><b>${c.tendency}</b><div class="tiny muted">US ${c.understeerRate.toFixed(0)}% · OS ${c.oversteerRate.toFixed(0)}%</div></div>`;
+              if (!c || c.samples < 60) return `<div class="c dim small">little data${c?.samples ? ` (${(c.samples / 60).toFixed(0)} s)` : ''}</div>`;
+              const bal = typeof c.balance === 'number' && isFinite(c.balance) ? c.balance : null;
+              const how = bal == null ? '' : bal >= 1 ? `needs ${bal.toFixed(0)}% more lock` : bal <= -1 ? `rotates ${(-bal).toFixed(0)}% more` : 'as normal';
+              return `<div class="c ${c.tendency}" title="At the limit: ${c.understeerRate.toFixed(0)}% of the time clearly understeering, ${c.oversteerRate.toFixed(0)}% clearly oversteering · ${(c.samples / 60).toFixed(0)} s of data"><b>${c.tendency}</b><div class="tiny muted">${how} · ${(c.samples / 60).toFixed(0)} s at the limit</div></div>`;
             }).join('')}`).join('')}</div>
             <ul class="steps" style="margin-top:12px">${hd.findings.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
-            ${hd.hotSpots.length ? `<div class="small muted">Hot spots: ${hd.hotSpots.map(h => `${esc(h.corner)} (${h.kind} on ${h.phase} ×${h.count})`).join(', ')}</div>` : ''}`
+            ${hd.hotSpots.length ? `<div class="small muted">Hot spots: ${hd.hotSpots.map(h => `${esc(h.corner)} (${h.kind} on ${h.phase}, ${h.count} laps)`).join(', ')}</div>` : ''}`
           : '<div class="muted">Not enough laps at the limit to judge the balance.</div>'}
+          <p class="small muted" style="margin:8px 0 0">How it's measured: how much steering the car needs at the limit compared with the same car at moderate cornering, in the same kind of corner and speed. Within ±10% is neutral.</p>
           <p class="small muted">Setup: ${esc(r.source)}</p>
         </div>
         <div class="card"><div class="card-head"><h2 class="grow">Suggested changes</h2></div>
-          ${r.items.length ? r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title)} · ${esc(it.request.phase)} · ${esc(it.request.speed)}</h3>${adviceHtml({ ...it.advice, changes: it.advice.changes.slice(0, 4), drivingTips: it.advice.drivingTips.slice(0, 1), notes: [] })}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">')
+          ${r.items.length ? suggestionsHtml(r)
           : '<div class="insight s0"><div class="ttl">No consistent handling problem detected. Work on driving consistency first — see the session debrief.</div></div>'}
         </div>
       </div>`;

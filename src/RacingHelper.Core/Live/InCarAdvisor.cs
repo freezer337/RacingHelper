@@ -104,7 +104,7 @@ public sealed class InCarAdvisor
         }
         if (rep.Valid)
         {
-            foreach (var c in rep.Cells.Where(c => c.Tendency != "neutral").OrderByDescending(c => Math.Max(c.UndersteerRate, c.OversteerRate)))
+            foreach (var c in rep.Cells.Where(c => c.Tendency != "neutral").OrderByDescending(c => float.IsFinite(c.Balance) ? Math.Abs(c.Balance) : 0))
             {
                 string reason = $"{c.Tendency} {(c.Phase == "mid" ? "mid-corner" : "on " + c.Phase)}";
                 switch (c.Tendency, c.Phase)

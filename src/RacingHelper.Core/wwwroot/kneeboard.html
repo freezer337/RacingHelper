@@ -42,6 +42,12 @@
     <div id="setup" class="muted"></div>
   </div>
 
+  <div class="box hidden" id="pace-box">
+    <div class="label">Pace</div>
+    <div id="pace"></div>
+    <div id="pace2" class="muted"></div>
+  </div>
+
   <div class="box" id="tyre-box">
     <div class="label">Tyres</div>
     <div id="tyre-state">–</div>
@@ -77,7 +83,8 @@
 
   function render(s) {
     $('title').textContent = s.car || 'Racing Helper';
-    $('session').textContent = s.status === 'waiting' ? 'waiting for iRacing' : [s.track, s.sessionType].filter(Boolean).join(' · ');
+    const radio = { practice: 'practice radio', quali: 'quali radio', race: 'race radio', minimal: 'minimal radio' }[s.radioProfile] || '';
+    $('session').textContent = s.status === 'waiting' ? 'waiting for iRacing' : [s.track, s.sessionType, radio].filter(Boolean).join(' · ');
 
     // everything that asks you to change something on the car, in one place
     const todo = [];
@@ -90,6 +97,18 @@
     const running = s.setupState && !['Off', 'Done'].includes(s.setupState);
     $('setup').textContent = s.setupStatus || '';
     show('setup-box', running || !!s.setupStatus);
+
+    const p = s.pace;
+    const lt = v => { if (!num(v)) return '–'; const m = Math.floor(v / 60), x = v - m * 60; return m ? `${m}:${x.toFixed(3).padStart(6, '0')}` : x.toFixed(3); };
+    const dl = d => (d >= 0 ? '+' : '−') + Math.abs(d).toFixed(2);
+    if (p && num(p.lastLap)) {
+      $('pace').innerHTML = `Last <b>${lt(p.lastLap)}</b>${num(p.best) ? ` <span class="${p.lastLap <= p.best + 1e-6 ? 'good' : 'muted'}">${dl(p.lastLap - p.best)}</span> · best ${lt(p.best)}` : ''}`;
+      const bits = [];
+      if (num(p.trend)) bits.push(`<span class="${p.trend < -0.03 ? 'good' : p.trend > 0.03 ? 'bad' : ''}">${Math.abs(p.trend) < 0.03 ? 'steady' : p.trend < 0 ? 'faster' : 'slower'} ${dl(p.trend)}/lap</span>`);
+      if (num(p.theoreticalBest) && num(p.best) && p.best - p.theoreticalBest > 0.02) bits.push(`${(p.best - p.theoreticalBest).toFixed(2)} in your best corners${p.focus ? ` (${esc(p.focus)})` : ''}`);
+      $('pace2').innerHTML = bits.join(' · ');
+    }
+    show('pace-box', !!(p && num(p.lastLap)));
 
     const t = s.tyreLoad;
     if (t && t.state) {

@@ -127,6 +127,7 @@ public sealed class EngineerMessage
     public float LapDist { get; set; } = float.NaN;     // where it was said (m); with ValidUntil: drop it if it can't be heard before then
     public float ValidUntil { get; set; } = float.NaN;  // lap distance (m) after which a coaching tip is useless
     public bool Immediate { get; set; }                 // answers to the driver's own questions: no waiting for a straight
+    public string Key { get; set; } = "";               // dedupe key it was said with (e.g. "quali-one-more")
 }
 
 public sealed class TyreManagerLive
@@ -138,6 +139,32 @@ public sealed class TyreManagerLive
     public float RearLoad { get; set; } = float.NaN;
     public bool HasBaseline { get; set; }
     public float CoolLaps { get; set; } = float.NaN;    // estimated laps until hot tyres are back to normal
+}
+
+/// <summary>Your pace this session, updated every lap (Live pace page and VR panel).</summary>
+public sealed class PaceLive
+{
+    public double LastLap { get; set; } = double.NaN;
+    public bool LastValid { get; set; }
+    public double Best { get; set; } = double.NaN;             // best clean lap this session
+    public double TheoreticalBest { get; set; } = double.NaN;  // best lap + what your best corners are worth together
+    public double Average { get; set; } = double.NaN;          // last (up to) 5 clean laps
+    public double Spread { get; set; } = double.NaN;           // slowest − fastest of those
+    public double Trend { get; set; } = double.NaN;            // s per lap over the last clean laps (− = getting faster)
+    public int CleanLaps { get; set; }
+    public int Laps { get; set; }
+    public string Focus { get; set; } = "";                    // where most of the theoretical gain is, e.g. "T1 0.24, T3 0.13"
+    public List<FocusCorner> Corners { get; set; } = new();    // where you keep losing time against your reference, and how to fix it
+}
+
+/// <summary>A corner where your last clean laps lose time to the reference lap, with what to do differently.</summary>
+public sealed class FocusCorner
+{
+    public string Name { get; set; } = "";
+    public double Loss { get; set; }          // average seconds lost per lap there (last clean laps)
+    public int Laps { get; set; }             // how many of those laps lost time there
+    public string Advice { get; set; } = "";  // "Brake 12 m later", "Carry 6 km/h more through the apex"…
+    public string Reference { get; set; } = "";
 }
 
 /// <summary>Immutable-by-convention snapshot of everything live, published ~20× per second.</summary>
@@ -220,11 +247,14 @@ public sealed class LiveState
     public float TankCapacity { get; set; }
     public List<TyreLive> Tyres { get; set; } = new();
     public TyreManagerLive? TyreLoad { get; set; }
+    public PaceLive? Pace { get; set; }
     public string CoachTip { get; set; } = "";
     public string SetupState { get; set; } = "Off";        // guided setup session: Off / Baseline / WaitChange / Evaluate / Done
     public string SetupStatus { get; set; } = "";
     public string? SetupInstruction { get; set; }
     public bool QuietMode { get; set; }
+    public string RadioMode { get; set; } = "auto";   // setting: auto | practice | quali | race | minimal
+    public string RadioProfile { get; set; } = "";    // in use now: practice | quali | race | minimal
     public string LastCrash { get; set; } = "";
     public string CarAdvice { get; set; } = "";       // in-car adjustments the engineer suggests right now
     public string PitPlan { get; set; } = "";         // what the automatic pit service would set

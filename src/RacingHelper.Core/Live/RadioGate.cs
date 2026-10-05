@@ -18,10 +18,14 @@ public sealed class RadioGate
     double _now;
 
     public event Action<EngineerMessage>? Released;
+    /// <summary>The messages that go out together (one straight, or everything at once in the pits).</summary>
+    public event Action<IReadOnlyList<EngineerMessage>>? ReleasedBatch;
     public EngineerMessage? Last { get; private set; }
     /// <summary>Quiet mode: only important calls (priority 2+) and answers to your questions.</summary>
     public bool Quiet { get; set; }
     public int Waiting { get { lock (_lock) return _queue.Count; } }
+    /// <summary>The radio profile in use (practice / quali / race / minimal), see RaceEngineer.Profile.</summary>
+    public Func<string> Profile { get; set; } = () => "race";
 
     public RadioGate(Func<AppSettings> settings) { _settings = settings; }
 
@@ -30,17 +34,33 @@ public sealed class RadioGate
     public void Enqueue(EngineerMessage m)
     {
         if (Quiet && m.Priority < 2 && !m.Immediate) return;
+        if (Profile() == "quali" && !QualiAllows(m)) return;
         bool now = !_settings().QuietInCorners || m.Priority >= 3 || m.Immediate || float.IsFinite(m.ValidUntil);
         if (now) { Send(m); return; }
         lock (_lock) _queue.Add((m, _now));
     }
 
-    void Send(EngineerMessage m)
+    void Send(EngineerMessage m) => Send(new[] { m });
+
+    void Send(IReadOnlyList<EngineerMessage> ms)
     {
-        _busyUntil = Math.Max(_busyUntil, _now) + Duration(m.Text);
-        if (m.Category != "answer") Last = m;
-        Released?.Invoke(m);
+        if (ms.Count == 0) return;
+        foreach (var m in ms)
+        {
+            _busyUntil = Math.Max(_busyUntil, _now) + Duration(m.Text);
+            if (m.Category != "answer") Last = m;
+            Released?.Invoke(m);
+        }
+        ReleasedBatch?.Invoke(ms);
     }
+
+    /// <summary>
+    /// Qualifying radio is half silent: tyre warm-up / "push now" / overheating, where you're losing time (corner losses,
+    /// coaching, crash analysis), "time for one more lap", anything urgent, and answers to your own questions. No lap
+    /// times, setup chatter, gaps or general info.
+    /// </summary>
+    public static bool QualiAllows(EngineerMessage m) =>
+        m.Immediate || m.Priority >= 2 || m.Category is "tyres" or "corner" or "coach" or "incident" || m.Key == "quali-one-more";
 
     /// <summary>Not driving (in the pits, sim closed, replay paused): everything can be said now.</summary>
     public void Flush(double now)
@@ -48,7 +68,7 @@ public sealed class RadioGate
         _now = now;
         List<(EngineerMessage m, double at)> all;
         lock (_lock) { all = _queue.ToList(); _queue.Clear(); }
-        foreach (var x in all) Released?.Invoke(x.m);
+        if (all.Count > 0) Send(all.OrderByDescending(x => x.m.Priority).ThenBy(x => x.at).Select(x => x.m).ToList());
         _calmSince = double.NaN;
     }
 
@@ -62,8 +82,8 @@ public sealed class RadioGate
         lock (_lock)
         {
             if (_queue.Count == 0) return;
-            // drop what's no longer worth saying
-            _queue.RemoveAll(x => now - x.at > (x.m.Priority switch { 0 => 45, 1 => 90, _ => 600 }) || now < x.at);
+            // drop what's no longer worth saying (long enough that a few slow laps of corners don't lose anything)
+            _queue.RemoveAll(x => now - x.at > (x.m.Priority switch { 0 => 120, 1 => 240, _ => 600 }) || now < x.at);
             if (_queue.Count == 0) return;
             next = _queue.OrderByDescending(x => x.m.Priority).ThenBy(x => x.at).First();
         }
@@ -83,8 +103,24 @@ public sealed class RadioGate
         if (!ok && next.m.Priority >= 2 && waited > 20) ok = true;
         if (!ok) return;
 
-        lock (_lock) _queue.Remove(next);
-        Send(next.m);
+        // everything else that's waiting goes out on the same straight if there's room (one after the other, so nothing
+        // waits for a straight of its own and gets forgotten); what doesn't fit waits for the next straight
+        var batch = new List<EngineerMessage> { next.m };
+        lock (_lock)
+        {
+            _queue.Remove(next);
+            double room = float.IsFinite(toZone) ? toZone / Math.Max(f.Speed, 10f) : 3 * need;
+            double used = need;
+            foreach (var x in _queue.OrderByDescending(x => x.m.Priority).ThenBy(x => x.at).ToList())
+            {
+                double d = Duration(x.m.Text);
+                if (used + d > room * 1.1) continue;
+                used += d;
+                batch.Add(x.m);
+                _queue.Remove(x);
+            }
+        }
+        Send(batch);
     }
 
     /// <summary>Braking / turn-in zones from the track model (braking points from the reference lap when there is one).</summary>

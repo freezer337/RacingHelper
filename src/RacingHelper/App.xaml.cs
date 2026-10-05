@@ -17,7 +17,6 @@ public partial class App : Application
     public TelemetryHub Hub { get; private set; } = null!;
     public WebServer Web { get; private set; } = null!;
     public OverlayManager Overlays { get; private set; } = null!;
-    public Voice Voice { get; private set; } = null!;
     public WheelButtons? Wheel { get; private set; }
     IbtWatcher? _watcher;
     TrayIcon? _tray;
@@ -70,12 +69,10 @@ public partial class App : Application
                 else if (r.Laps > 0) Hub.Engineer.Info($"Imported {Path.GetFileName(r.File)}: {r.Laps} laps ({r.ValidLaps} clean) — racing lines and tyre data added.");
             };
 
-            Voice = new Voice(() => Settings.Current);
-            Hub.Radio.Released += m =>
+            // CrewChief is the only voice (Jim's recordings where he has them); messages wait while it's not in a session
+            Hub.Radio.ReleasedBatch += ms =>
             {
-                if (!Settings.Current.VoiceEnabled) return;
-                if (Hub.CrewChief.TryHandle(m)) return;   // CrewChief connected → it speaks (or already says this itself)
-                Voice.Say(m.Text, m.Priority);
+                if (Settings.Current.VoiceEnabled) Hub.CrewChief.TryHandle(ms);
             };
 
             Hub.Start();
@@ -194,7 +191,6 @@ public partial class App : Application
             Overlays?.Dispose();
             _watcher?.Dispose();
             Hub?.Dispose();
-            Voice?.Dispose();
             if (Web != null) await Web.DisposeAsync();
         }
         catch (Exception ex) { Log("Shutdown: " + ex.Message); }

@@ -23,7 +23,37 @@ public sealed class RaceEngineer
         lock (_lock) return _log.TakeLast(n).ToList();
     }
 
-    int Verbosity => _settings().VoiceVerbosity switch { "minimal" => 0, "detailed" => 2, _ => 1 };
+    /// <summary>practice / quali / race from the current session type (set by the hub).</summary>
+    public string SessionKind { get; set; } = "practice";
+
+    public static readonly string[] Modes = { "auto", "practice", "quali", "race", "minimal" };
+
+    /// <summary>The radio profile in use: the one fixed in settings, or the session's own when it's on auto.</summary>
+    public string Profile
+    {
+        get
+        {
+            string m = _settings().RadioMode;
+            return m is "practice" or "quali" or "race" or "minimal" ? m : SessionKind;
+        }
+    }
+
+    /// <summary>0 minimal, 1 normal (race, and qualifying before its own filter), 2 lots (practice).</summary>
+    public int Verbosity => Profile switch { "minimal" => 0, "practice" => 2, _ => 1 };
+
+    public static string ModeName(string mode) => mode switch
+    {
+        "practice" => "practice radio", "quali" => "qualifying radio", "race" => "race radio", "minimal" => "minimal radio", _ => "automatic radio",
+    };
+
+    /// <summary>What the profile means, spoken when it changes.</summary>
+    public static string ProfileText(string profile) => profile switch
+    {
+        "practice" => "Lots of info: lap times, where you gain and lose, setup and tyre calls",
+        "quali" => "Half silent. Only tyre warm-up, when to push, and where you're losing time",
+        "minimal" => "Only flags, fuel, damage and personal bests",
+        _ => "The normal race calls",
+    };
 
     /// <param name="key">dedupe key; the same key is not repeated within <paramref name="cooldownSec"/>.</param>
     /// <returns>false when suppressed by the cooldown.</returns>
@@ -38,7 +68,7 @@ public sealed class RaceEngineer
                 if (_lastByKey.TryGetValue(key, out var last) && (DateTime.Now - last).TotalSeconds < cooldownSec) return false;
                 _lastByKey[key] = DateTime.Now;
             }
-            var m = new EngineerMessage { Text = text, Category = category, Priority = priority, Speak = speak, LapDist = lapDist, ValidUntil = validUntil, Immediate = immediate };
+            var m = new EngineerMessage { Text = text, Category = category, Priority = priority, Speak = speak, LapDist = lapDist, ValidUntil = validUntil, Immediate = immediate, Key = key ?? "" };
             _log.Add(m);
             if (_log.Count > 200) _log.RemoveRange(0, 50);
             Said?.Invoke(m);

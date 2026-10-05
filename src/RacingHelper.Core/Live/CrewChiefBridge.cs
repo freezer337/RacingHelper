@@ -37,13 +37,44 @@ public sealed class CrewChiefBridge : IDisposable
     public string Error { get; private set; } = "";
     public string DriverName => _subscribers.Values.Select(t => t[(SubscribeTopic.Length + 1)..]).FirstOrDefault() ?? "";
     public bool Connected => !_subscribers.IsEmpty;
-    public bool ReceivingTelemetry => (DateTime.UtcNow - _lastTelemetry).TotalSeconds < 10;
+    /// <summary>
+    /// CrewChief only publishes telemetry while it's started and in a live session phase (practice/quali/race on track,
+    /// formation, countdown…) — exactly when it will play our messages. In menus or with "Start Application" not pressed it
+    /// silently drops them, so until then they wait here (see TryHandle).
+    /// </summary>
+    public bool ReceivingTelemetry => (DateTime.UtcNow - _lastTelemetry).TotalSeconds < 15;
+    /// <summary>Connected and in a session, so a message sent now will be heard.</summary>
+    public bool Live => Connected && ReceivingTelemetry;
     public int Port => _port;
     public int Sent { get; private set; }
 
     public event Action<string>? Log;
 
-    public CrewChiefBridge(Func<AppSettings> settings) { _settings = settings; }
+    // messages said while CrewChief can't speak (not started, menus): sent as soon as it's live, dropped after 2 minutes
+    readonly List<(EngineerMessage m, DateTime at)> _held = new();
+    readonly Timer _pump;
+
+    public CrewChiefBridge(Func<AppSettings> settings)
+    {
+        _settings = settings;
+        _pump = new Timer(_ => Pump(), null, 1000, 1000);
+    }
+
+    /// <summary>Messages waiting for CrewChief to be in a session.</summary>
+    public int Held { get { lock (_held) return _held.Count; } }
+
+    void Pump()
+    {
+        List<EngineerMessage> go;
+        lock (_held)
+        {
+            _held.RemoveAll(x => (DateTime.UtcNow - x.at).TotalSeconds > 120);
+            if (_held.Count == 0 || !Live) return;
+            go = _held.Select(x => x.m).ToList();
+            _held.Clear();
+        }
+        Speak(go);
+    }
 
     public async Task StartAsync()
     {
@@ -74,7 +105,9 @@ public sealed class CrewChiefBridge : IDisposable
             };
             _server.InterceptingPublishAsync += e =>
             {
-                if (e.ApplicationMessage.Topic?.StartsWith(TelemetryTopic + "/", StringComparison.Ordinal) == true) _lastTelemetry = DateTime.UtcNow;
+                // anything CrewChief publishes (its telemetry topic may have been renamed) — not our own /coach messages
+                var t = e.ApplicationMessage.Topic ?? "";
+                if (e.ClientId != "RacingHelper" && !t.StartsWith(SubscribeTopic, StringComparison.Ordinal)) _lastTelemetry = DateTime.UtcNow;
                 return Task.CompletedTask;
             };
             _server.ClientDisconnectedAsync += e =>
@@ -118,37 +151,78 @@ public sealed class CrewChiefBridge : IDisposable
         Status = "off";
     }
 
-    /// <summary>Should this message go to CrewChief instead of the Windows voice?</summary>
-    public bool UseCrewChief => _settings().VoiceOutput switch
-    {
-        "windows" => false,
-        "crewchief" => _server != null,
-        _ => Connected,
-    };
+    /// <summary>CrewChief is the only voice: true whenever our broker is running.</summary>
+    public bool UseCrewChief => _server != null;
 
     /// <summary>
-    /// Routes a spoken engineer message. Returns true when CrewChief took care of it (spoken, or deliberately left to
-    /// CrewChief because it announces that itself); false → speak it with the Windows voice.
+    /// Routes a spoken engineer message to CrewChief. Returns false only when the broker isn't running.
+    /// Things CrewChief announces itself are skipped; while CrewChief isn't in a session the message waits.
     /// </summary>
-    public bool TryHandle(EngineerMessage m)
+    public bool TryHandle(EngineerMessage m) => TryHandle(new[] { m });
+
+    /// <summary>Several messages released together (one straight): sent back to back so none of them expires.</summary>
+    public bool TryHandle(IReadOnlyList<EngineerMessage> ms)
     {
-        if (!UseCrewChief) return false;
-        if (_settings().CrewChiefSkipDuplicates && Duplicates.Contains(m.Category)) return true;
-        Send(m.Text, m.Priority, m.LapDist, m.ValidUntil);
+        if (_server == null) return false;
+        var list = ms.Where(m => !(_settings().CrewChiefSkipDuplicates && Duplicates.Contains(m.Category))).ToList();
+        if (list.Count == 0) return true;
+        if (!Live)
+        {
+            // corner tips are only worth hearing right now
+            lock (_held) _held.AddRange(list.Where(m => !float.IsFinite(m.ValidUntil)).Select(m => (m, DateTime.UtcNow)));
+            return true;
+        }
+        Speak(list);
         return true;
     }
 
-    public void Send(string text, int priority, float lapDist = float.NaN, float validUntil = float.NaN)
+    /// <summary>
+    /// Jim's recorded clip where he has one; the rest as text (CrewChief reads that with a TTS voice), joined into one
+    /// message so it plays in one go. Everything goes to CrewChief's "immediate" queue: we already waited for a straight,
+    /// and its normal queue throws messages away after 10 seconds when it's busy.
+    /// </summary>
+    void Speak(IReadOnlyList<EngineerMessage> ms)
+    {
+        bool jimOnly = _settings().CrewChiefJimOnly;
+        var text = new List<string>();
+        int prio = ms.Max(m => m.Priority);
+        foreach (var m in ms)
+        {
+            if (float.IsFinite(m.LapDist) && float.IsFinite(m.ValidUntil))
+            {
+                // timed corner tip: CrewChief plays it only between here and the braking point
+                if (!jimOnly) Send(m.Text, m.Priority, m.LapDist, m.ValidUntil);
+                continue;
+            }
+            var (clips, rest) = CrewChiefPhrases.Map(m);
+            foreach (var c in clips) SendRaw(c, m.Priority, immediate: true);
+            if (!jimOnly && rest.Length > 0) text.Add(rest.TrimEnd('.', ' ') + ".");
+        }
+        if (text.Count > 0) Send(string.Join(" ", text), prio, immediate: true);
+    }
+
+    /// <summary>Radio check in Jim's own voice. False when CrewChief can't speak right now.</summary>
+    public bool RadioCheck()
+    {
+        if (!Live) return false;
+        SendRaw(CrewChiefPhrases.RadioCheck, 2, immediate: true);
+        return true;
+    }
+
+    public void Send(string text, int priority, float lapDist = float.NaN, float validUntil = float.NaN, bool immediate = false)
+        => SendRaw(ForSpeech(text), priority, lapDist, validUntil, immediate);
+
+    void SendRaw(string message, int priority, float lapDist = float.NaN, float validUntil = float.NaN, bool immediate = false)
     {
         var srv = _server;
         if (srv == null || _subscribers.IsEmpty) return;
         var payload = new JsonObject
         {
-            ["message"] = ForSpeech(text),
+            ["message"] = message,
             // CrewChief: 0 lowest, 5 default, 10 spotter. Higher = inserted nearer the head of its queue.
             ["priority"] = priority switch { <= 0 => 3, 1 => 5, 2 => 7, _ => 9 },
         };
-        if (priority >= 3) payload["immediate"] = true;
+        if (priority >= 3 || immediate) payload["immediate"] = true;
         if (float.IsFinite(lapDist) && float.IsFinite(validUntil) && validUntil > lapDist)
         {
             // only play it between here and the braking point; dropped if CrewChief is busy until then
@@ -170,7 +244,8 @@ public sealed class CrewChiefBridge : IDisposable
         var s = text;
         s = Regex.Replace(s, @"(\d)\s*°C", "$1 degrees");
         s = Regex.Replace(s, @"(\d)\s*°", "$1 degrees");
-        s = s.Replace("km/h", " K P H").Replace("→", " to ").Replace("–", " to ").Replace("…", ".");
+        s = Regex.Replace(s, @"(^|[\s(])[-−](\d)", "$1minus $2");
+        s = s.Replace("km/h", " kilometres an hour").Replace("→", " to ").Replace("–", " to ").Replace("…", ".");
         s = Regex.Replace(s, @"\s*—\s*", ", ");
         s = Regex.Replace(s, @"(\d)\s*kPa", "$1 K P A");
         s = Regex.Replace(s, @"(\d)\s*L\b", "$1 litres");
@@ -252,6 +327,8 @@ public sealed class CrewChiefBridge : IDisposable
             connected = Connected,
             driverName = DriverName,
             receivingTelemetry = ReceivingTelemetry,
+            live = Live,
+            held = Held,
             usingCrewChief = UseCrewChief,
             sent = Sent,
             configPath = ConfigPath,
@@ -262,5 +339,9 @@ public sealed class CrewChiefBridge : IDisposable
         };
     }
 
-    public void Dispose() => Task.Run(StopAsync).Wait(2000);
+    public void Dispose()
+    {
+        _pump.Dispose();
+        Task.Run(StopAsync).Wait(2000);
+    }
 }

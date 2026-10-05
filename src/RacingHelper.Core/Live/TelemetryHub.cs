@@ -96,6 +96,9 @@ public sealed class TelemetryHub : IDisposable
     PitStopInfo? _lastStop;
     LapComparison? _lastCmp;
     readonly List<double> _recentLaps = new();
+    readonly List<double> _cleanLaps = new();   // every clean lap this session (pace trend)
+    readonly List<LapComparison> _recentCmps = new();   // last clean laps vs the reference, corner by corner
+    PaceLive? _pace;
 
     // input history ring buffers (~30 Hz, 6 s)
     const int Hist = 180;
@@ -143,7 +146,7 @@ public sealed class TelemetryHub : IDisposable
         CarManager.InBox += OnInBox;
         CrewChief = new CrewChiefBridge(() => Settings.Current);
         CrewChief.Log += m => Engineer.Info(m);
-        Radio = new RadioGate(() => Settings.Current);
+        Radio = new RadioGate(() => Settings.Current) { Profile = () => Engineer.Profile };
         Engineer.Said += m => { if (m.Speak) Radio.Enqueue(m); };
         _source = _live;
         Analysis.MyDriverIdProvider = () => Settings.Current.MyUserId;
@@ -222,7 +225,82 @@ public sealed class TelemetryHub : IDisposable
         ("crash", "Why did I crash?"),
         ("repeat", "Repeat the last message"),
         ("quiet", "Quiet mode on / off (only important calls)"),
+        ("radio-mode", "Radio mode: auto → practice → qualifying → race"),
+        ("radio", "Radio check"),
     };
+
+    PaceLive BuildPace(RecordedLap lap)
+    {
+        var p = new PaceLive { LastLap = lap.LapTime, LastValid = lap.Valid && !lap.OutLap && !lap.InLap, CleanLaps = _cleanLaps.Count, Laps = lap.LapNumber };
+        if (_cleanLaps.Count > 0) p.Best = _cleanLaps.Min();
+        if (_recentLaps.Count >= 3) { p.Average = _recentLaps.Average(); p.Spread = _recentLaps.Max() - _recentLaps.Min(); }
+        // trend: least squares over the last 8 clean laps, leaving out traffic / mistake laps (1.5 s+ off the median)
+        var last = _cleanLaps.TakeLast(8).ToList();
+        if (last.Count >= 4)
+        {
+            double med = last.OrderBy(x => x).ElementAt(last.Count / 2);
+            var pts = last.Select((t, i) => (x: (double)i, y: t)).Where(q => q.y - med < 1.5).ToList();
+            if (pts.Count >= 4)
+            {
+                double mx = pts.Average(q => q.x), my = pts.Average(q => q.y);
+                double sxx = pts.Sum(q => (q.x - mx) * (q.x - mx));
+                if (sxx > 0) p.Trend = pts.Sum(q => (q.x - mx) * (q.y - my)) / sxx;
+            }
+        }
+        // corners where the last clean laps keep losing time to the reference, with the latest advice for each
+        p.Corners = _recentCmps.SelectMany(c => c.Corners.Select(x => (x, reference: c)))
+            .GroupBy(t => t.x.Name)
+            .Select(g =>
+            {
+                var losing = g.Where(t => t.x.TimeDelta > 0.02f).ToList();
+                var latest = losing.LastOrDefault().x;
+                return new FocusCorner
+                {
+                    Name = g.Key,
+                    Loss = g.Average(t => (double)Math.Max(0, t.x.TimeDelta)),
+                    Laps = losing.Count,
+                    Advice = latest == null ? "" : latest.Advice.FirstOrDefault() ?? latest.Verdict,
+                    Reference = _ref?.Label ?? "",
+                };
+            })
+            .Where(fc => fc.Loss >= 0.03 && fc.Advice.Length > 0 && fc.Laps * 2 >= Math.Min(_recentCmps.Count, 4))
+            .OrderByDescending(fc => fc.Loss).Take(4).ToList();
+        try
+        {
+            var (best, gain, top) = Insights.PotentialInfo();
+            if (double.IsFinite(best) && best > 0) p.TheoreticalBest = best - gain;
+            p.Focus = string.Join(", ", top.Select(t => $"{t.name} {t.gain:0.00}"));
+        }
+        catch { }
+        return p;
+    }
+
+    /// <summary>New session: on automatic radio, say once when the radio changes character (e.g. practice → qualifying).</summary>
+    void SetSessionKind(string kind)
+    {
+        string before = Engineer.Profile;
+        Engineer.SessionKind = kind;
+        string after = Engineer.Profile;
+        if (Settings.Current.RadioMode == "auto" && after != before)
+            Engineer.Say($"{(after == "quali" ? "Qualifying" : after == "race" ? "Race" : "Practice")} radio. {RaceEngineer.ProfileText(after)}.", "info", 1, "radio-profile", 30);
+    }
+
+    /// <summary>Radio check: says which voice it came through, and why CrewChief isn't the one talking when it isn't.</summary>
+    public string RadioCheck()
+    {
+        var s = Settings.Current;
+        string mode = $"{Cap(RaceEngineer.ModeName(s.RadioMode))}{(s.RadioMode == "auto" ? ", " + Engineer.Profile switch { "quali" => "qualifying", "race" => "race", _ => "practice" } + " right now" : "")}.";
+        string why = !s.CrewChiefEnabled ? "CrewChief is switched off in Settings."
+            : CrewChief.Status == "error" ? CrewChief.Error
+            : !CrewChief.Connected ? "CrewChief isn't connected: start CrewChief and press Start Application (Settings → CrewChief shows the steps)."
+            : !CrewChief.Live ? "CrewChief is connected but only talks once you're in a session on track. Try again from the car."
+            : "";
+        if (why.Length > 0) return why;
+        CrewChief.RadioCheck();
+        return $"Radio check sent: Jim answers on CrewChief's radio. {mode}";
+    }
+
+    static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>Answers a driver question out loud straight away (no waiting for a straight) and returns the text.</summary>
     public string Ask(string id)
@@ -282,6 +360,23 @@ public sealed class TelemetryHub : IDisposable
                 Engineer.Say(last.Text, "answer", 2, immediate: true);
                 return last.Text;
             }
+            case "radio":
+            {
+                // Jim answers himself; the text only goes to the feed
+                string r = RadioCheck();
+                Engineer.Say(r, "info", 0, speak: false);
+                return "";
+            }
+            case "radio-mode":
+            {
+                var modes = new[] { "auto", "practice", "quali", "race" };
+                int i = Array.IndexOf(modes, Settings.Current.RadioMode);
+                string next = modes[(i + 1) % modes.Length];
+                Settings.Update(x => x.RadioMode = next);
+                return next == "auto"
+                    ? $"Automatic radio, {(Engineer.SessionKind == "quali" ? "qualifying" : Engineer.SessionKind)} right now. {RaceEngineer.ProfileText(Engineer.Profile)}."
+                    : $"{Cap(RaceEngineer.ModeName(next))}. {RaceEngineer.ProfileText(next)}.";
+            }
             case "quiet":
                 Radio.Quiet = !Radio.Quiet;
                 return Radio.Quiet ? "Quiet mode on. Only important calls from now." : "Quiet mode off. Full radio.";
@@ -327,7 +422,7 @@ public sealed class TelemetryHub : IDisposable
         if (req.Symptom == "understeer" && req.Phase == "entry" && dc.ContainsKey("dcBrakeBias")) return "move brake bias back 0.5";
         if (si.IsFixedSetup) return "";
         req.Category = si.CarCategory;
-        var ch = SetupOptimiser.Advise(req, si.CarSetup).Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
+        var ch = SetupOptimiser.Advise(req, si.CarSetup, si.IsFixedSetup).Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
         return ch == null ? "" : $"{ch.Parameter}, {ch.Action.ToLowerInvariant()} in the garage";
     }
 
@@ -623,6 +718,9 @@ public sealed class TelemetryHub : IDisposable
         _diskLoggingRequested = false;
         _lastCmp = null;
         _recentLaps.Clear();
+        _cleanLaps.Clear();
+        _recentCmps.Clear();
+        _pace = null;
     }
 
     // ------------------------------------------------------------------ reference handling
@@ -670,6 +768,7 @@ public sealed class TelemetryHub : IDisposable
     {
         ResetSessionState();
         TyreManager.OnSession(ctx.Info, ctx.SessionType);
+        SetSessionKind(TyreManager.Kind(ctx.SessionType));
         Coach.Reset(ctx.SessionType);
         CarManager.Reset(ctx.Info, ctx.SessionType);
         SetupEngineer.Reset(ctx.Info, ctx.SessionType);
@@ -838,7 +937,13 @@ public sealed class TelemetryHub : IDisposable
         Insights.OnLapGaps(lap.LapNumber, _standings, fr.PlayerCarIdx, fuel?.LapsRemaining ?? double.NaN);
         Insights.OnLapFuel(lap.LapNumber, fuel, reference, model);
         _lastCmp = cmp;
-        if (lap.Valid && !lap.OutLap && !lap.InLap) { _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0); }
+        if (lap.Valid && !lap.OutLap && !lap.InLap)
+        {
+            _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0);
+            _cleanLaps.Add(lap.LapTime);
+            if (cmp != null) { _recentCmps.Add(cmp); if (_recentCmps.Count > 5) _recentCmps.RemoveAt(0); }
+        }
+        _pace = BuildPace(lap);
 
         // damage heuristic: pace after an incident
         if (_incidentLapWatch >= 0 && lap.LapNumber > _incidentLapWatch && lap.Valid)
@@ -964,19 +1069,29 @@ public sealed class TelemetryHub : IDisposable
         double px = _tracker.PosX, py = _tracker.PosY;
         if (!(f.HasGps && model.FromGps))
         {
-            // pull the dead-reckoned position onto the map with a slowly adapting offset (~300 m time constant)
+            // pin the dead-reckoned position to the map: along the track quickly (the lap distance is exact), across it
+            // only slowly, so the trail shows where you really are across the width (see LineAlign)
             var (mx, my) = model.PosAt(d);
-            double tx = mx - px, ty = my - py;
-            if (!_offInit) { _offX = tx; _offY = ty; _offInit = true; }
+            var (ax, ay) = model.PosAt(d - 4); var (bx, by) = model.PosAt(d + 4);
+            double len = Math.Max(1e-3, Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay)));
+            double tx = (bx - ax) / len, ty = (by - ay) / len, nx = -ty, ny = tx;
+            double gx = mx - px, gy = my - py;
+            if (!_offInit) { _offX = gx; _offY = gy; _offInit = true; }
             else
             {
                 float moved = float.IsNaN(_offLastD) ? 0 : Math.Abs(d - _offLastD);
                 if (moved > model.Length / 2) moved = 0;
-                double a = Math.Clamp(moved / 300.0, 0, 1);
-                _offX += (tx - _offX) * a; _offY += (ty - _offY) * a;
+                double ka = Math.Clamp(moved / LineAlign.AlongM, 0, 1), kl = Math.Clamp(moved / LineAlign.AcrossM, 0, 1);
+                double ex = gx - _offX, ey = gy - _offY;
+                double ea = ex * tx + ey * ty, el = ex * nx + ey * ny;
+                _offX += ea * ka * tx + el * kl * nx; _offY += ea * ka * ty + el * kl * ny;
             }
             _offLastD = d;
             px += _offX; py += _offY;
+            // never further off the line than a car can be
+            double lat = (px - mx) * nx + (py - my) * ny;
+            double fix = Math.Clamp(lat, -LineAlign.MaxOffTrackM, LineAlign.MaxOffTrackM) - lat;
+            px += fix * nx; py += fix * ny;
         }
         if (!float.IsNaN(_trailLastD) && Math.Abs(d - _trailLastD) < 2 && Math.Abs(d - _trailLastD) < model.Length / 2) return;
         _trailLastD = d;
@@ -1181,11 +1296,14 @@ public sealed class TelemetryHub : IDisposable
             TrackModelVersion = model == null ? 0 : (int)(model.SourceLapId % 1_000_000_000) + 1,
             Messages = Engineer.Recent(),
             TyreLoad = TyreManager.Snapshot(),
+            Pace = _pace,
             CoachTip = Coach.LastTip,
             SetupState = SetupEngineer.State.ToString(),
             SetupStatus = SetupEngineer.Status,
             SetupInstruction = SetupEngineer.Instruction,
             QuietMode = Radio.Quiet,
+            RadioMode = Settings.Current.RadioMode,
+            RadioProfile = Engineer.Profile,
             LastCrash = Crash.Last?.Summary ?? "",
             CarAdvice = InCarAdvisor.Current.Count > 0 ? "Car adjustments: " + InCarAdjustments.Join(InCarAdvisor.Current) : "",
             PitPlan = _pitPlanText,

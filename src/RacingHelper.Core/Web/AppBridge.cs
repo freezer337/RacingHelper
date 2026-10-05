@@ -4,11 +4,9 @@ public sealed record ButtonPress(string Device, string DeviceName, int Button);
 
 public sealed record OverlayInfo(string Id, string Name, string Description, double Width, double Height, bool DefaultOn);
 
-/// <summary>Things only the desktop shell can do (voice, overlay windows, opening folders).</summary>
+/// <summary>Things only the desktop shell can do (overlay windows, opening folders, wheel buttons, hotkeys).</summary>
 public interface IAppBridge
 {
-    IReadOnlyList<string> Voices();
-    void Speak(string text);
     bool OverlayEditMode { get; set; }
     void OverlaysChanged();
     void OpenFolder(string path);

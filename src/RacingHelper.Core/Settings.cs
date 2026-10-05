@@ -53,18 +53,17 @@ public sealed class AppSettings
 
     // race engineer
     public bool VoiceEnabled { get; set; } = true;
-    public string VoiceVerbosity { get; set; } = "normal";  // minimal | normal | detailed
-    public int VoiceRate { get; set; } = 1;                 // -10..10
-    public int VoiceVolume { get; set; } = 100;
-    public string VoiceName { get; set; } = "";
+    // radio mode: auto picks by session — practice: lots of info, qualifying: half silent (tyre warm-up / push + where
+    // you lose time), race: the normal radio. Or fix it to one of them (or minimal: flags, fuel, damage, PBs).
+    public string RadioMode { get; set; } = "auto";         // auto | practice | quali | race | minimal
     public bool CornerCallouts { get; set; }                // speak after each corner where time was lost
     public bool QuietInCorners { get; set; } = true;        // hold messages until a straight with room to finish them
-    public string VoiceOutput { get; set; } = "auto";       // auto (CrewChief when connected, else Windows) | windows | crewchief
 
     // CrewChief V4: we host a local MQTT broker; CrewChief connects to it and speaks our messages
     public bool CrewChiefEnabled { get; set; } = true;
     public int CrewChiefPort { get; set; } = 1883;
     public bool CrewChiefSkipDuplicates { get; set; } = true; // don't send what CrewChief already says itself (flags, fuel, lap times…)
+    public bool CrewChiefJimOnly { get; set; }              // only what Jim recorded is spoken; the rest is on the dashboard only
 
     // car management while driving
     public bool TyreManager { get; set; } = true;           // cold / overheating / push calls from live sliding energy
@@ -81,6 +80,7 @@ public sealed class AppSettings
         new() { Action = "reference", Keys = "Ctrl+Shift+F11" }, new() { Action = "dashboard", Keys = "Ctrl+Shift+F12" },
         new() { Action = "tyres", Keys = "Ctrl+Shift+F5" }, new() { Action = "fuel", Keys = "Ctrl+Shift+F6" },
         new() { Action = "gaps", Keys = "Ctrl+Shift+F7" }, new() { Action = "repeat", Keys = "Ctrl+Shift+F8" },
+        new() { Action = "radio-mode", Keys = "Ctrl+Shift+F4" }, new() { Action = "radio", Keys = "Ctrl+Shift+F3" },
     };
 
     public List<KeyBinding> EffectiveKeys() => KeyBindings ?? DefaultKeys.Select(k => new KeyBinding { Action = k.Action, Keys = k.Keys }).ToList();

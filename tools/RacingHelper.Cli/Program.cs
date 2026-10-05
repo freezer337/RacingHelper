@@ -17,6 +17,15 @@ switch (args[0])
     case "sessions": SessionsCmd(args[1]); break;
     case "report": ReportCmd(args[1], long.Parse(args[2])); break;
     case "corners": CornersCmd(args[1], args[2]); break;
+    case "advise":   // advise <db> <sessionId> <symptom> <phase> [open]: setup advice for that session's car (open = ignore fixed)
+    {
+        var db = new Database(args[1]);
+        var si = new RacingHelper.Sim.SessionInfo(db.GetSessionInfoYaml(long.Parse(args[2]))!);
+        var adv = RacingHelper.Analysis.SetupOptimiser.Advise(new RacingHelper.Analysis.SetupRequest { Symptom = args[3], Phase = args[4], Category = si.CarCategory }, si.CarSetup, si.IsFixedSetup && !(args.Length > 5 && args[5] == "open"));
+        foreach (var c in adv.Changes) Console.WriteLine($"{c.Priority}. {c.Parameter}: {c.Action} {(c.Target.Length > 0 ? "[" + c.Target + "]" : "")} {(c.InCar ? "(in car)" : "")} | {string.Join(" · ", c.Current)}");
+        foreach (var n in adv.Notes) Console.WriteLine("   note: " + n);
+        break;
+    }
     case "gears": GearsCmd(args[1], long.Parse(args[2])); break;
     case "hub": HubCmd(args[1], args[2], double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture)); break;
     case "serve": await ServeCmd(args[1], int.Parse(args[2])); break;
@@ -45,13 +54,13 @@ static async Task ServeCmd(string dbPath, int port)
     if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
     hub.Engineer.Said += m =>
     {
-        // same routing as the desktop app: CrewChief when connected, otherwise (here) just the console
         if (!m.Speak) Console.WriteLine($"  >> [{m.Category}] {m.Text}");
     };
-    hub.Radio.Released += m =>
+    // same routing as the desktop app: everything to CrewChief, released together per straight
+    hub.Radio.ReleasedBatch += ms =>
     {
-        bool cc = hub.CrewChief.TryHandle(m);
-        Console.WriteLine($"  >> [{m.Category}{(cc ? "/crewchief" : "/voice")}] {m.Text}");
+        hub.CrewChief.TryHandle(ms);
+        foreach (var m in ms) Console.WriteLine($"  >> [{m.Category}/radio{(ms.Count > 1 ? $" batch of {ms.Count}" : "")}] {m.Text}");
     };
     hub.Start();
     var watcher = new IbtWatcher(new IbtImporter(store), db, () => settings.Current);
@@ -68,7 +77,7 @@ static void HubCmd(string dbPath, string ibt, double speed)
     settings.Current.DataFolder = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
     settings.Current.CrewChiefEnabled = false;
     if (Environment.GetEnvironmentVariable("RH_COACH") is { Length: > 0 } coach) settings.Current.CoachingMode = coach;
-    if (Environment.GetEnvironmentVariable("RH_VERBOSITY") is { Length: > 0 } verb) settings.Current.VoiceVerbosity = verb;
+    if (Environment.GetEnvironmentVariable("RH_RADIO") is { Length: > 0 } radio) settings.Current.RadioMode = radio;
     if (Environment.GetEnvironmentVariable("RH_RUNLAPS") is { Length: > 0 } rl) settings.Current.SetupRunLaps = int.Parse(rl);
     var store = new SessionStore(new Database(dbPath));
     var hub = new RacingHelper.Live.TelemetryHub(settings, store, new AnalysisService(store));

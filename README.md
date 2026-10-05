@@ -47,7 +47,7 @@ The dashboard also runs at http://127.0.0.1:5199. Enable LAN access in Settings 
 | **Line comparison** | GPS racing lines from your .ibt files on the map, plus the live *Line Comparison* overlay (your line vs the reference through the current corner) |
 | **Leaderboards**: personal bests, compare with rivals | **Leaderboards**:<br>• PBs for every car/track<br>• your fastest laps and theoretical best<br>• "rivals" = laps from any other driver's .ibt you import (friend, coach, pro)<br>• any lap can become your live delta reference |
 | **Setup optimiser** (descriptive questions) | **Setup → Optimiser**: answer what / where / which corners / how bad / preference and get prioritised changes. Each change shows the current value from your actual setup (e.g. "Rear ARB = Soft"), with driving-technique tips |
-| — | **Setup → Auto-detect**: understeer / oversteer by corner phase and speed, measured from steering vs yaw response at the limit, plus wheelspin, lock-ups and tyre temps → suggested changes |
+| — | **Setup → Auto-detect**: understeer / oversteer by corner phase and speed, measured from steering vs yaw response at the limit, plus wheelspin, lock-ups and tyre temps → changes **for this car only**, as plain values: the garage field, current → new, and how much: "Front ARB blade: 5 → 4 (1 step softer)", "Rear damper rebound: +9 → +8 clicks", "Front spring rate: 106 → 100 N/mm (both sides)", "Rear pushrod offset: −16.0 → −15.0 mm", "Front brake pressure bias: 57.0 → 56.5%". iRacing's live setup lists exactly what the car can adjust, so nothing it doesn't have is suggested; fixed setups get only in-car dials; a part already at its limit is skipped. Steps are the usual iRacing increments (1 click, 1 blade, ~5 % spring, 1 mm, 0.2° camber, 0.2 mm toe, 0.5 % bias, ~3 kPa). The guided setup session says the same thing on the radio: "Box, and in the garage: rear ARB blade, 3 to 2." |
 | — | **Setup → Journal**: every setup you drive is fingerprinted automatically; see the fastest one and exactly what changed between them |
 | **Setup auto installer** (type / version / car filters) | **Setup → Installer**: keep setups in `Documents\RacingHelper\SetupLibrary\<car folder>\…`. When you join a session they're copied into `iRacing\setups\<car>\RacingHelper`, filtered by race / quali / wet, latest version only, and optionally matching the track |
 | **Tyre tool**: pressure & temperature analysis, smart feedback, one-click adjustments, stint/lap, avg/max | **Tyres**: hot pressures and inner/middle/outer temps per lap or stint (average or peak), against a per-car target window. Gives camber and pressure advice, suggested cold pressures, and **"Send to pit"** sets them in iRacing's pit service |
@@ -57,7 +57,7 @@ The dashboard also runs at http://127.0.0.1:5199. Enable LAN access in Settings 
 
 ### The engineer (feedback while you drive)
 
-The engineer speaks through Windows voices and also writes everything to the feed overlay and dashboard:
+The engineer speaks through CrewChief's radio (see *CrewChief V4 as the voice*; there is no other voice) and also writes everything to the feed overlay and dashboard:
 
 - **Session start:** greets you with the car, track and your PB here; announces setup changes since your last run and the track conditions.
 - **Every lap:** lap time and delta to the reference, plus the corner where you lost the most and why ("Most time lost at turn 5: 0.38, apex −8 km/h").
@@ -69,7 +69,40 @@ The engineer speaks through Windows voices and also writes everything to the fee
 - **Optional corner callouts** after every corner where you lost time.
 - **Session end:** a debrief summary with what to focus on next time.
 
-Verbosity is set in Settings.
+### Live pace: your session analysis while you drive
+
+Open **Live pace** in the dashboard (a second monitor, alt-tab, or a phone/tablet: turn on **Settings → Allow opening the dashboard from other devices**, restart Racing Helper, and the address to type on your phone is shown there and at the bottom of the sidebar) and keep driving. You don't need to leave the session: it updates a moment after every lap.
+
+- **Last lap, best lap, theoretical best** (all your best corners together, and which corners hold the time), **trend** (s per lap over your last clean laps: getting faster / slower / steady) and the average and spread of your last 5 clean laps.
+- **This lap**, live: delta, predicted lap, sectors and the last corner.
+- **Where your time is:** the corners where you lose the most on average against your own best there, with apex speeds, braking-point spread and lock-ups.
+- **What to work on:** the debrief (consistency, coasting, trail braking, shift points, lock-ups, tyres), updated every lap.
+- **Setup, live:** what to change in the car right now (brake bias, TC, ABS, in-car bars), the setup session and setup sheet, and the garage changes the handling analysis suggests from this session, plus the handling grid. The Live page shows the top three garage suggestions too.
+- Pace chart and the lap table.
+
+When you're not on track it shows your last session.
+
+### iPad / tablet: the pit-wall view
+
+Open Racing Helper's address on an iPad or phone (Settings shows it once *Allow opening the dashboard from other devices* is on) and you get a focused, full-screen page made for a tablet next to the rig, in portrait or landscape: last / best lap, how much is in your best corners, the trend, **where you're slow and how to be faster** (the corners where your last clean laps keep losing time to your reference, each with what to do: "Get back to throttle earlier, 59 m later than the reference", "Carry 4 km/h more at the apex"), **what to change on the car** (in-car dials now, the setup session, garage changes for this car with target values), tyres and the last incident. *Open the full dashboard* at the bottom gets you everything else. Share → Add to Home Screen makes it an app icon.
+
+**Phone says "unreachable"?** Settings → *Phone & tablet access* checks it for you: it shows the right address (your real Wi-Fi/Ethernet one, not a VPN or virtual adapter), whether Windows Firewall blocks Racing Helper (Windows adds a hidden block rule when its firewall popup is cancelled, and most home networks count as "Public"), and an **Allow through Windows Firewall** button that fixes it after the admin prompt. It removes the block rules and lets in only devices on your own network. The phone also has to be on the same Wi-Fi (not mobile data or a guest network), and some routers keep Wi-Fi devices apart ("AP isolation").
+
+### Where you are on the track (live map and lines)
+
+iRacing doesn't send your car's GPS position while you drive (only the .ibt file has it, after the session). Racing Helper works it out from your speed and heading (dead reckoning, ~0.1 % drift) and pins it to the track map: along the track quickly, because the lap distance is exact, but across the track only very slowly, so the map shows where you really are across the width (inside, outside, on the kerb) instead of always on the middle line. Checked against GPS: about 0.6 m off live and 0.4 m for a recorded lap, where the old method was 1.3–2 m. The trail on the map, the line comparison and the Telemetry lines all use it.
+
+### Radio mode: practice, qualifying, race
+
+By default the radio changes with the session (**Settings → Race engineer → Radio mode → Automatic by session**):
+
+| Session | What you hear |
+|---|---|
+| **Practice** | Lots of info: lap times and deltas, the corner where you lost the most and the ones where you gained, conditions, setup-session and in-car advice, tyre calls, corner coaching. |
+| **Qualifying** | Half silent: "Out lap, get heat into the tyres", "Tyres are in. Push now.", tyre overheating, the corner where you lost the most, corner tips, crash analysis, "time for one more lap", and anything urgent. No lap times, setup chatter or general info. |
+| **Race** | The normal race radio (as before). |
+
+When a new session starts on automatic, the engineer says once which radio it's on ("Qualifying radio. Half silent…"). You can also fix it to one mode in Settings (or Minimal: flags, fuel, damage, PBs), or cycle it while driving with the **Radio mode** button/key (`Ctrl+Shift+F4`): automatic → practice → qualifying → race → automatic. The current mode shows on the Live page and the VR panel. Answers to your own questions always come through, in every mode.
 
 ### Managing the car while you drive
 
@@ -105,7 +138,7 @@ Verbosity is set in Settings.
 - **Race debrief → next practice.** After a race: your position, incidents, crashes (yours vs others), pace drop over the race, tyre overheating and any of the engineer's calls you didn't act on. Anything worth fixing is saved for that car and track. In the next practice there, the setup session starts with it: "Before you go out, from the race: 2 × power oversteer. In the garage, rear anti-roll bar, soften one step." Then it runs and judges it as usual, and a change that proves good goes into the preset. The session briefing also reminds you where you went off last time.
 - **Automatic pit service.** As you enter pit road, it fills in iRacing's pit menu for you, then says what it set:
   - fuel to the finish (plus your safety margin)
-  - four tyres if enough laps are left, with the cold pressures your last run here says you need
+  - four tyres if at least *N* laps are left after the stop (Settings, default 6: new tyres for the last couple of laps aren't worth the time), with the cold pressures your last run here says you need
   - fast repair if there's damage
   - a tear-off
 
@@ -121,6 +154,7 @@ Racing Helper serves a VR panel at `http://127.0.0.1:5199/kneeboard.html`. It's 
 The panel shows:
 - **Change on the car:** the setup session's instruction, the in-car adjustments it suggests, and preset values your setup is missing
 - the setup session progress
+- your pace: last and best lap, the trend, and how much is in your best corners
 - tyre state and load per tyre, with the cool-down estimate
 - fuel and what the pit service will set
 - the last incident and why it happened
@@ -155,6 +189,8 @@ Bind any question to a button on your wheel or button box in **Settings → Whee
 | What will you set at my pit stop? | "When you box I'll set: 7 litres, four tyres at 176, 177, 171, 172 kPa, tear-off." | |
 | Repeat the last message | | `Ctrl+Shift+F8` |
 | Quiet mode on/off | Only important calls until you switch it back | |
+| Radio mode | "Qualifying radio. Half silent. Only tyre warm-up, when to push, and where you're losing time." | `Ctrl+Shift+F4` |
+| Radio check | "Radio check, loud and clear through CrewChief. Automatic radio, race right now." | `Ctrl+Shift+F3` |
 
 ### More calls you don't get from iRacing
 
@@ -173,15 +209,21 @@ If you use [CrewChief](https://thecrewchief.org/), it can speak Racing Helper's 
    - tick **MQTT Telemetry enabled**
    - type any **MQTT drivername**
    - leave text-to-speech on (anything but "Never")
-3. Save and restart CrewChief. The status in Settings turns green: "Connected as …".
+3. Save and restart CrewChief, and press **Start Application** in CrewChief. The status in Settings turns green: "Connected as …".
+4. Get in the car and do a radio check (Settings button, or your bound key/button, `Ctrl+Shift+F3`). Jim answers in his own voice.
+
+**CrewChief only talks while you're in a session.** It drops messages that arrive while you're in the menus, while it isn't started, or before the session is running. Racing Helper sees whether CrewChief is live (it only sends its telemetry then) and holds anything said before that, for up to 2 minutes, until CrewChief can play it. A radio check from the menus tells you on screen why there's no answer yet.
+
+**Jim's voice vs the TTS voice.** CrewChief plays Jim's real recordings only for phrases he recorded; any other sentence it can only read with a Windows text-to-speech voice. So every call Jim has a recording for goes out as his clip: cold tyres, hot / cooking tyres (front, rear, each corner, all round), good tyre temps, last lap, radio check. The rest (corner coaching, setup and in-car changes, crash analysis, cool-down estimates) has no recording, so CrewChief reads it with TTS. Settings → CrewChief → *Only Jim's own recorded voice* skips those instead; they still show on the dashboard and the iPad view.
+
+**Nothing gets forgotten when there's a lot to say.** Everything waiting is sent together on the next straight that has room for it, straight into CrewChief's immediate queue (its normal queue throws a message away if it hasn't played within 10 seconds). What doesn't fit waits for the next straight, for up to 2–4 minutes.
 
 Details:
 
-- With **Who speaks = auto** (the default), messages go to CrewChief whenever it's connected; otherwise the Windows voice speaks them.
+- Nothing from CrewChief at all, even on track? Check CrewChief → Properties → text-to-speech isn't "Never" (Jim's clips still play, but the rest needs TTS). CrewChief prefers a male Windows voice (e.g. Microsoft David); with only another voice installed it uses that one.
 - Things CrewChief already says itself (flags, fuel, lap times, PBs, incidents, damage) aren't sent twice. They still appear in the feed.
 - Corner tips are sent with a distance window, so CrewChief drops a tip rather than play it after the braking point.
-- CrewChief reads these messages with a Windows TTS voice, not Jim's recorded voice; his recordings only cover CrewChief's own phrases.
-- iRacing has no in-game race engineer that other apps can control. CrewChief (or the Windows voice) is how Racing Helper talks to you.
+- iRacing has no in-game race engineer that other apps can control. CrewChief is how Racing Helper talks to you.
 
 ### After a session
 
@@ -206,6 +248,7 @@ iRacing's .ibt file is imported automatically, which adds GPS lines, tyre data a
 - **Live tyre data:** during a live session iRacing only gives pit-measured carcass temps and cold pressures. Full surface temps and hot pressures come from the .ibt file after the session; keep iRacing telemetry logging on (the app can switch it on for you).
 - **Gap trends** need other cars' data, which iRacing only gives live (not in .ibt replays).
 - **Wheel buttons** use Windows Raw Input; if a button doesn't register, check that Windows sees the device in *Set up USB game controllers*.
+- **How the balance is measured.** For every moment near the grip limit (70% of the sideways grip the car shows at that speed, so downforce cars count in slow corners too), it compares how much steering the car needs with what the same car needs at moderate cornering in the same speed range and phase (braking / mid / throttle). That cancels the normal speed effect (every car needs relatively more lock at speed) and the normal rotation under braking. Within ±10% is neutral. A hot spot is a corner where it happened on at least two laps. Lock-ups count when a wheel turns 30%+ slower than the car for 6 m (5–15% under hard braking is normal), and they and wheelspin only become setup suggestions when they happen on at least every other lap. Validated on two F4 sessions.
 - **Tyre management is relative, not in degrees.** It knows "you're sliding the fronts 25% more than your normal clean laps here", not "the fronts are 104°C". It was validated on two F4 sessions (Bathurst, Phillip Island). The thresholds may need tuning for very different cars, and it can't see straight-line lock-ups (no live wheel speeds).
 - **CrewChief link:** needs CrewChief's MQTT feature (CrewChief V4 4.16+). Racing Helper only listens on this PC (127.0.0.1); change the port in Settings if another MQTT broker already uses 1883.
 - **Setup pressures:** `.sto` files are binary, so the installer copies setups but can't rewrite pressures. Use the Tyre tool's "send to pit" instead.
