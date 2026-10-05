@@ -125,8 +125,8 @@
     for (const it of (garage?.items || []).slice(0, 3)) {
       const c = it.advice.changes[0];
       if (!c) continue;
-      items.push(`<div class="item">${c.inCar ? '<span class="tag">in the car</span>' : '<span class="tag ok">garage</span>'} <span class="small muted">${esc(it.advice.title)}${it.request.phase && it.request.phase !== 'all' ? ' · ' + esc(it.request.phase) : ''}</span>
-        <div class="big" style="margin-top:4px">${esc(c.parameter)}: ${esc(c.action)}${c.target ? ` <span class="warn">(${esc(c.target)})</span>` : ''}</div></div>`);
+      items.push(`<div class="item">${c.inCar ? '<span class="tag">in the car</span>' : '<span class="tag ok">garage</span>'} <span class="small muted">${esc(it.advice.title.split(' — ')[0])}${it.request.phase && it.request.phase !== 'all' ? ' · ' + esc(it.request.phase) : ''}</span>
+        <div class="big" style="margin-top:4px">${c.target ? `${esc(c.target)} <span class="small muted">${esc(c.step || '')}</span>` : `${esc(c.parameter)}: ${esc(c.action)}`}</div></div>`);
     }
     for (const l of (s.setupSheet || []).slice(0, 3)) items.push(`<div class="item small">${esc(l)}</div>`);
     $('car').className = items.length ? '' : 'empty';

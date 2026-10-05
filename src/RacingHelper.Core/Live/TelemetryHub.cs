@@ -1069,19 +1069,29 @@ public sealed class TelemetryHub : IDisposable
         double px = _tracker.PosX, py = _tracker.PosY;
         if (!(f.HasGps && model.FromGps))
         {
-            // pull the dead-reckoned position onto the map with a slowly adapting offset (~300 m time constant)
+            // pin the dead-reckoned position to the map: along the track quickly (the lap distance is exact), across it
+            // only slowly, so the trail shows where you really are across the width (see LineAlign)
             var (mx, my) = model.PosAt(d);
-            double tx = mx - px, ty = my - py;
-            if (!_offInit) { _offX = tx; _offY = ty; _offInit = true; }
+            var (ax, ay) = model.PosAt(d - 4); var (bx, by) = model.PosAt(d + 4);
+            double len = Math.Max(1e-3, Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay)));
+            double tx = (bx - ax) / len, ty = (by - ay) / len, nx = -ty, ny = tx;
+            double gx = mx - px, gy = my - py;
+            if (!_offInit) { _offX = gx; _offY = gy; _offInit = true; }
             else
             {
                 float moved = float.IsNaN(_offLastD) ? 0 : Math.Abs(d - _offLastD);
                 if (moved > model.Length / 2) moved = 0;
-                double a = Math.Clamp(moved / 300.0, 0, 1);
-                _offX += (tx - _offX) * a; _offY += (ty - _offY) * a;
+                double ka = Math.Clamp(moved / LineAlign.AlongM, 0, 1), kl = Math.Clamp(moved / LineAlign.AcrossM, 0, 1);
+                double ex = gx - _offX, ey = gy - _offY;
+                double ea = ex * tx + ey * ty, el = ex * nx + ey * ny;
+                _offX += ea * ka * tx + el * kl * nx; _offY += ea * ka * ty + el * kl * ny;
             }
             _offLastD = d;
             px += _offX; py += _offY;
+            // never further off the line than a car can be
+            double lat = (px - mx) * nx + (py - my) * ny;
+            double fix = Math.Clamp(lat, -LineAlign.MaxOffTrackM, LineAlign.MaxOffTrackM) - lat;
+            px += fix * nx; py += fix * ny;
         }
         if (!float.IsNaN(_trailLastD) && Math.Abs(d - _trailLastD) < 2 && Math.Abs(d - _trailLastD) < model.Length / 2) return;
         _trailLastD = d;

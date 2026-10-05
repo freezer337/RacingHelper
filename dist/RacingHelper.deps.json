@@ -7,7 +7,7 @@
   "targets": {
     ".NETCoreApp,Version=v9.0": {},
     ".NETCoreApp,Version=v9.0/win-x64": {
-      "RacingHelper/1.7.0": {
+      "RacingHelper/1.8.0": {
         "dependencies": {
           "Microsoft.Web.WebView2": "1.0.2849.39",
           "RacingHelper.Core": "1.0.0",
@@ -133,7 +133,7 @@
     }
   },
   "libraries": {
-    "RacingHelper/1.7.0": {
+    "RacingHelper/1.8.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

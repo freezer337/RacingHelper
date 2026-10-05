@@ -114,13 +114,12 @@ public sealed class SetupEngineer
             _tried.Add(change.Parameter);
             string words = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, todo.Reason) is { } said
                 ? said.Words : $"{change.Parameter}, {change.Action}";
-            string now = change.Target.Length > 0 ? $" From {change.Target.Replace(" → ", " to ")}."
-                   : change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
+            string now = change.Current.Count > 0 && change.Target.Length == 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
             State = Phase.WaitChange;
-            Instruction = InCar(change.Parameter) ? Cap(words) : $"{change.Parameter}: {change.Action}";
+            Instruction = InCar(change.Parameter) ? Cap(words) : Garage(change);
             plan = InCar(change.Parameter)
                 ? $"Before the run, from {todo.Reason}: in the car, {words}.{now} Then {LapsPerRun} laps."
-                : $"Before you go out, from {todo.Reason}: in the garage, {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.";
+                : $"Before you go out, from {todo.Reason}: in the garage, {Spoken(Garage(change))}.{now} Then {LapsPerRun} laps.";
             return true;
         }
         return false;
@@ -268,17 +267,20 @@ public sealed class SetupEngineer
         _tried.Add(change.Parameter);
         var cell = rep!.Cells.FirstOrDefault(c => c.Tendency == pick.Symptom && c.Phase == pick.Phase);
         string where = cell != null ? $"{pick.Symptom} {(pick.Phase == "mid" ? "mid-corner" : "on " + pick.Phase)} in {cell.SpeedBand} corners" : pick.Symptom;
-        string now = change.Target.Length > 0 ? $" From {change.Target.Replace(" → ", " to ")}."
-                   : change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
+        string now = change.Current.Count > 0 && change.Target.Length == 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
         State = Phase.WaitChange;
         // in-car changes are said as a plain instruction: "increase TC by 1"
         string inCarWords = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, where) is { } said
             ? said.Words : $"{change.Parameter}, {change.Action}";
-        Instruction = InCar(change.Parameter) ? Cap(inCarWords) : $"{change.Parameter}: {change.Action}{(change.Target.Length > 0 ? $" ({change.Target})" : "")}";
+        // just what to change: "Rear ARB blade: 3 → 2"
+        Instruction = InCar(change.Parameter) ? Cap(inCarWords) : Garage(change);
         Say(InCar(change.Parameter)
-            ? $"{intro}You've got {where}. In the car: {inCarWords}.{now} I'll see it when you do."
-            : $"{intro}You've got {where}. Box, and in the garage: {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.", 2);
+            ? $"{intro}You've got {where}. In the car: {inCarWords}.{now}"
+            : $"{intro}You've got {where}. Box, and in the garage: {Spoken(Garage(change))}.{now} Then {LapsPerRun} laps.", 2);
     }
+
+    static string Garage(SetupChange c) => c.Target.Length > 0 ? c.Target : $"{c.Parameter}: {c.Action}";
+    static string Spoken(string s) => s.Replace(" → ", " to ").Replace(": ", ", ").Replace("ARB", "bar").Replace("°", " degrees");
 
     void Verdict()
     {

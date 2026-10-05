@@ -57,22 +57,26 @@ export function suggestionsHtml(r, compact = false) {
     : '<div class="small muted">Needs a few clean laps at the limit (3+).</div>';
   if (compact) return `<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">${r.items.slice(0, 3).map(it => {
       const c = it.advice.changes[0];
-      return `<li><div class="small muted">${esc(it.advice.title)}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div><b>${esc(c.parameter)}</b> — ${esc(c.action)}${c.target ? ` (${esc(c.target)})` : ''}${c.inCar ? ' <span class="tag blue">in the car</span>' : ''}</div>` : ''}</li>`;
+      return `<li><div class="small muted">${esc(it.advice.title.split(' — ')[0])}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div>${changeLine(c)}</div>` : ''}</li>`;
     }).join('')}</ol>`;
-  return r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title)} · ${esc(it.request.phase)} · ${esc(it.request.speed)}</h3>${adviceHtml({ ...it.advice, changes: it.advice.changes.slice(0, 4), drivingTips: it.advice.drivingTips.slice(0, 1), notes: [] })}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">');
+  return r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title.split(' — ')[0])}${it.request.phase && it.request.phase !== 'all' ? ' · ' + esc(it.request.phase) : ''}${it.request.speed && it.request.speed !== 'all' ? ' · ' + esc(it.request.speed) + ' corners' : ''}</h3>${adviceHtml(it.advice)}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">');
+}
+
+/** One line per change: the garage field, current → new, how many clicks. Nothing else. */
+export function changeLine(c) {
+  const tag = c.inCar ? ' <span class="tag blue">in the car</span>' : '';
+  return c.target
+    ? `<b>${esc(c.target)}</b>${c.step ? ` <span class="muted small">${esc(c.step)}</span>` : ''}${tag}`
+    : `<b>${esc(c.parameter)}</b>: ${esc(c.action)}${tag}`;
 }
 
 function adviceHtml(a) {
+  if (!a.changes.length) return `<div class="muted">${a.fixedSetup ? 'Fixed setup: the garage is locked and this car has no in-car dial that helps with this.' : 'Nothing this car can adjust helps with this.'} Work on the driving first.</div>`;
   return `
-    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">
-      ${a.changes.slice(0, 8).map((c, i) => `<li ${i > 3 ? 'class="muted"' : ''}>
-        <div><b>${esc(c.parameter)}</b> — ${esc(c.action)}${c.target ? ` <b class="num">(${esc(c.target)})</b>` : ''} <span class="tag ${i < 3 ? 'green' : ''}">${i < 3 ? 'try first' : esc(c.area)}</span>${c.inCar ? ' <span class="tag blue">in the car</span>' : ''}</div>
-        <div class="small muted">${esc(c.why)} · ${esc(c.amount)}</div>
-        ${c.current.length ? `<div class="tiny" style="margin-top:3px">Current: <span class="num">${c.current.map(esc).join(' · ')}</span></div>` : ''}
-      </li>`).join('')}
+    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">
+      ${a.changes.slice(0, 4).map(c => `<li>${changeLine(c)}</li>`).join('')}
     </ol>
-    ${a.drivingTips.length ? `<h3 style="margin-top:18px">Driving technique first</h3><ul class="steps">${a.drivingTips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-    <p class="small muted">${a.notes.map(esc).join(' ')}</p>`;
+    ${a.notAdjustable?.length ? `<p class="small muted" style="margin:8px 0 0">Not adjustable on this car: ${a.notAdjustable.map(esc).join(', ')}.</p>` : ''}`;
 }
 
 // ---------------------------------------------------------------- auto from telemetry
