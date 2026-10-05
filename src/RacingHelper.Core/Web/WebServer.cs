@@ -144,13 +144,10 @@ public sealed class WebServer : IAsyncDisposable
         app.MapGet("/api/engineer", () => J(_hub.Engineer.Recent(50)));
         app.MapPost("/api/engineer/test", () =>
         {
-            // CrewChief drops messages outside a live session (menus, garage before the session runs, app not started),
-            // so then this goes out on the Windows voice and the text says why
+            // CrewChief only speaks in a session (not in the menus or before Start Application); the text says why not
             var cc = _hub.CrewChief;
-            bool viaCc = cc.UseCrewChief;
             string text = _hub.RadioCheck();
-            if (viaCc) cc.Send(text, 2, immediate: true); else _app.Speak(text);
-            return J(new { ok = true, via = viaCc ? "crewchief" : "windows", text, crewChiefConnected = cc.Connected, crewChiefLive = cc.Live });
+            return J(new { ok = cc.Live, text, crewChiefConnected = cc.Connected, crewChiefLive = cc.Live });
         });
         app.MapGet("/api/crewchief", () => J(_hub.CrewChief.Describe()));
 
@@ -242,7 +239,6 @@ public sealed class WebServer : IAsyncDisposable
             await _hub.CrewChief.RestartAsync();
             return J(_hub.CrewChief.Describe());
         });
-        app.MapGet("/api/voices", () => J(_app.Voices()));
 
         // ---------------- sessions & laps ----------------
         app.MapGet("/api/sessions", (string? car, string? track) => J(Db.GetSessions(car, track)));
@@ -367,14 +363,14 @@ public sealed class WebServer : IAsyncDisposable
         app.MapPost("/api/setup/advise", async (HttpRequest req, long? session) =>
         {
             var r = await JsonSerializer.DeserializeAsync<SetupRequest>(req.Body, Json) ?? new SetupRequest();
-            var (setup, category, source) = SetupFor(session);
+            var (setup, category, source, fixedSetup) = SetupFor(session);
             if (string.IsNullOrEmpty(r.Category) || r.Category == "auto") r.Category = category;
-            return J(new { advice = SetupOptimiser.Advise(r, setup), source, category });
+            return J(new { advice = SetupOptimiser.Advise(r, setup, fixedSetup), source, category, fixedSetup });
         });
         app.MapGet("/api/setup/auto", (long session) =>
         {
             var rep = _hub.Analysis.SessionReport(session);
-            var (setup, category, source) = SetupFor(session);
+            var (setup, category, source, fixedSetup) = SetupFor(session);
             if (rep?.Handling == null || !rep.Handling.Valid) return J(new { handling = rep?.Handling, items = Array.Empty<object>(), source });
             var reqs = SetupOptimiser.FromHandling(rep.Handling, category);
             // tyre-driven requests
@@ -388,11 +384,13 @@ public sealed class WebServer : IAsyncDisposable
             if (rep.Style?.Wheelspins >= often) reqs.Add(new SetupRequest { Symptom = "traction", Category = category });
             if (rep.Corners.Sum(c => c.LockupsFront) >= often) reqs.Add(new SetupRequest { Symptom = "front-lockup", Category = category });
             if (rep.Corners.Sum(c => c.LockupsRear) >= often) reqs.Add(new SetupRequest { Symptom = "rear-lockup", Category = category });
-            return J(new { handling = rep.Handling, items = reqs.Select(q => new { request = q, advice = SetupOptimiser.Advise(q, setup) }), source });
+            // only symptoms this car can actually do something about
+            var items = reqs.Select(q => new { request = q, advice = SetupOptimiser.Advise(q, setup, fixedSetup) }).Where(x => x.advice.Changes.Count > 0).ToList();
+            return J(new { handling = rep.Handling, items, source, fixedSetup });
         });
         app.MapGet("/api/setup/current", (long? session) =>
         {
-            var (setup, category, source) = SetupFor(session);
+            var (setup, category, source, fixedSetup) = SetupFor(session);
             var flat = new List<KeyValuePair<string, string>>();
             setup?.Flatten("", flat);
             return J(new { source, category, values = flat.Select(kv => new { key = kv.Key, value = kv.Value }) });
@@ -588,7 +586,7 @@ public sealed class WebServer : IAsyncDisposable
         return sum;
     }
 
-    (YNode? setup, string category, string source) SetupFor(long? sessionId)
+    (YNode? setup, string category, string source, bool fixedSetup) SetupFor(long? sessionId)
     {
         if (sessionId is > 0)
         {
@@ -597,18 +595,18 @@ public sealed class WebServer : IAsyncDisposable
             if (row != null && y != null)
             {
                 var si = new SessionInfo(y);
-                return (si.CarSetup, si.CarCategory, $"{row.CarName} — {row.SessionType} {row.StartedAt:g}");
+                return (si.CarSetup, si.CarCategory, $"{row.CarName} — {row.SessionType} {row.StartedAt:g}{(si.IsFixedSetup ? " (fixed setup)" : "")}", si.IsFixedSetup);
             }
         }
         var live = _hub.Info;
-        if (live != null) return (live.CarSetup, live.CarCategory, $"Live: {live.CarName} ({live.SetupName})");
+        if (live != null) return (live.CarSetup, live.CarCategory, $"Live: {live.CarName} ({live.SetupName}){(live.IsFixedSetup ? " (fixed setup)" : "")}", live.IsFixedSetup);
         var last = Db.GetSessions(limit: 1).FirstOrDefault();
         if (last != null)
         {
             var y = Db.GetSessionInfoYaml(last.Id);
-            if (y != null) { var si = new SessionInfo(y); return (si.CarSetup, si.CarCategory, $"{last.CarName} — {last.SessionType} {last.StartedAt:g}"); }
+            if (y != null) { var si = new SessionInfo(y); return (si.CarSetup, si.CarCategory, $"{last.CarName} — {last.SessionType} {last.StartedAt:g}", si.IsFixedSetup); }
         }
-        return (null, "gt", "No setup available");
+        return (null, "gt", "No setup available", false);
     }
 
     object Journal(string car, string track)

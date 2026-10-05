@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B0E13">
+<title>Racing Helper · Pit wall</title>
+<style>
+  :root { --bg: #0B0E13; --card: #141922; --card2: #1B2230; --line: #262E3D; --text: #F2F5F9; --muted: #8E98AA;
+          --accent: #22D37E; --warn: #F5B942; --bad: #FF4D5E; --blue: #4DA3FF; --purple: #B26BFF; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 500 17px/1.35 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif; }
+  body { padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .top h1 { font-size: 22px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top .sub { color: var(--muted); font-size: 15px; font-weight: 500; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.live { background: var(--accent); box-shadow: 0 0 0 4px rgba(34, 211, 126, .18); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; min-width: 0; }
+  .tile .l { font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+  .tile .v { font-size: clamp(22px, 3.3vw, 32px); font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; white-space: nowrap; }
+  .tile .v small { font-size: .55em; font-weight: 600; color: var(--muted); }
+  .tile .s { font-size: 14px; color: var(--muted); margin-top: 2px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .card h2 { font-size: 15px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .item { padding: 12px 0; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; padding-top: 2px; }
+  .big { font-size: 20px; font-weight: 650; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+  .corner { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: start; }
+  .corner .name { font-size: 22px; font-weight: 800; }
+  .corner .loss { font-size: 14px; color: var(--warn); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(77, 163, 255, .16); color: var(--blue); vertical-align: middle; }
+  .tag.ok { background: rgba(34, 211, 126, .15); color: var(--accent); }
+  .good { color: var(--accent); } .bad { color: var(--bad); } .warn { color: var(--warn); } .purple { color: var(--purple); } .blue { color: var(--blue); }
+  .todo { border-left: 4px solid var(--warn); padding-left: 12px; }
+  .foot { margin-top: 16px; text-align: center; }
+  .foot a { color: var(--muted); font-size: 14px; }
+  .empty { color: var(--muted); font-size: 15px; }
+  /* iPad portrait and smaller */
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .tiles { grid-template-columns: 1fr 1fr; } .tile .v { font-size: 26px; } }
+</style>
+</head>
+<body>
+  <div class="top"><span class="dot" id="dot"></span><h1 id="title">Racing Helper <span class="sub">waiting for iRacing</span></h1></div>
+
+  <div class="tiles">
+    <div class="tile"><div class="l">Last lap</div><div class="v" id="last">–</div><div class="s" id="last-s"></div></div>
+    <div class="tile"><div class="l">Best lap</div><div class="v" id="best">–</div><div class="s" id="best-s"></div></div>
+    <div class="tile"><div class="l">In your best corners</div><div class="v" id="theo">–</div><div class="s" id="theo-s"></div></div>
+    <div class="tile"><div class="l">Trend</div><div class="v" id="trend">–</div><div class="s" id="trend-s"></div></div>
+  </div>
+
+  <div class="cols">
+    <div class="card"><h2>Where you're slow · how to be faster</h2><div id="corners" class="empty">After a few clean laps.</div></div>
+    <div>
+      <div class="card"><h2>Change on the car</h2><div id="car" class="empty">Nothing to change right now.</div></div>
+      <div class="card" style="margin-top:12px"><h2>Tyres &amp; last incident</h2><div id="tyres" class="empty">–</div></div>
+    </div>
+  </div>
+
+  <div class="foot"><a href="/?full=1#/pace">Open the full dashboard</a></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const num = v => typeof v === 'number' && isFinite(v);
+  const lt = v => { if (!num(v) || v <= 0) return '–'; const m = Math.floor(v / 60), x = v - m * 60; return m ? `${m}:${x.toFixed(3).padStart(6, '0')}` : x.toFixed(3); };
+  const sg = (d, n = 2) => (d >= 0 ? '+' : '−') + Math.abs(d).toFixed(n);
+  const TYRE = { cold: ['Cold, building temperature', 'blue'], ok: ['Good, you can push', 'good'], learning: ['Learning your normal load', 'muted'],
+    'hot-front': ['Fronts overheating', 'bad'], 'hot-rear': ['Rears overheating', 'bad'], hot: ['All four overheating', 'bad'] };
+
+  let sessionId = 0, lapKey = '', garage = null, timer = null, state = null;
+
+  async function loadGarage() {
+    if (!sessionId) { garage = null; return; }
+    try { garage = await (await fetch(`/api/setup/auto?session=${sessionId}`)).json(); } catch { garage = null; }
+    if (state) render(state);
+  }
+
+  function render(s) {
+    state = s;
+    const live = s.status === 'driving' || s.status === 'replay' || s.status === 'connected';
+    $('dot').className = 'dot' + (live ? ' live' : '');
+    $('title').innerHTML = s.status === 'waiting' ? 'Racing Helper <span class="sub">waiting for iRacing</span>'
+      : `${esc(s.car || 'Racing Helper')} <span class="sub">${esc([s.track, s.sessionType].filter(Boolean).join(' · '))}</span>`;
+
+    // pace
+    const p = s.pace;
+    if (p && num(p.lastLap)) {
+      $('last').textContent = lt(p.lastLap);
+      $('last').className = 'v' + (num(p.best) && p.lastLap <= p.best + 1e-6 && p.lastValid ? ' purple' : '');
+      $('last-s').textContent = num(p.best) ? `${sg(p.lastLap - p.best, 3)} to your best${p.lastValid ? '' : ' · not clean'}` : '';
+      $('best').textContent = lt(p.best);
+      $('best-s').textContent = `${p.cleanLaps} clean lap${p.cleanLaps === 1 ? '' : 's'}`;
+      const gain = num(p.theoreticalBest) && num(p.best) ? Math.max(0, p.best - p.theoreticalBest) : NaN;
+      $('theo').innerHTML = num(gain) ? gain.toFixed(2) + ' <small>s</small>' : '–';
+      $('theo-s').textContent = num(gain) ? `${lt(p.theoreticalBest)} possible${p.focus ? ' · ' + p.focus : ''}` : 'best of each corner together';
+      if (num(p.trend)) {
+        $('trend').innerHTML = sg(p.trend) + ' <small>s/lap</small>';
+        $('trend').className = 'v ' + (p.trend < -0.03 ? 'good' : p.trend > 0.03 ? 'bad' : '');
+        $('trend-s').textContent = (Math.abs(p.trend) < 0.03 ? 'steady' : p.trend < 0 ? 'getting faster' : 'getting slower') + (num(p.average) ? ` · last 5 avg ${lt(p.average)}` : '');
+      } else { $('trend').textContent = '–'; $('trend').className = 'v'; $('trend-s').textContent = 'after 4 clean laps'; }
+    }
+
+    // corners: where you keep losing time and what to do
+    const cs = p?.corners || [];
+    $('corners').className = cs.length ? '' : 'empty';
+    $('corners').innerHTML = cs.length ? cs.map(c => `
+      <div class="item corner"><div><div class="name">${esc(c.name)}</div><div class="loss">−${c.loss.toFixed(2)} s</div></div>
+        <div><div class="big">${esc(c.advice)}</div><div class="small muted">lost time here on ${c.laps} of your last laps${c.reference ? ' vs ' + esc(c.reference) : ''}</div></div></div>`).join('')
+      : `<div class="empty">${p?.cleanLaps ? 'No corner where you keep losing time. Nice: keep it consistent.' : 'After a few clean laps.'}</div>`;
+
+    // car: in-car changes now, the setup session, garage changes from this session
+    const items = [];
+    if (s.setupInstruction) items.push(`<div class="item todo"><div class="big">${esc(s.setupInstruction)}</div><div class="small muted">setup session</div></div>`);
+    if (s.carAdvice) items.push(`<div class="item"><span class="tag">in the car</span><div class="big" style="margin-top:4px">${esc(s.carAdvice.replace(/^Car adjustments: /, ''))}</div></div>`);
+    for (const it of (garage?.items || []).slice(0, 3)) {
+      const c = it.advice.changes[0];
+      if (!c) continue;
+      items.push(`<div class="item">${c.inCar ? '<span class="tag">in the car</span>' : '<span class="tag ok">garage</span>'} <span class="small muted">${esc(it.advice.title)}${it.request.phase && it.request.phase !== 'all' ? ' · ' + esc(it.request.phase) : ''}</span>
+        <div class="big" style="margin-top:4px">${esc(c.parameter)}: ${esc(c.action)}${c.target ? ` <span class="warn">(${esc(c.target)})</span>` : ''}</div></div>`);
+    }
+    for (const l of (s.setupSheet || []).slice(0, 3)) items.push(`<div class="item small">${esc(l)}</div>`);
+    $('car').className = items.length ? '' : 'empty';
+    $('car').innerHTML = items.length ? items.join('') : `<div class="empty">${garage?.fixedSetup ? 'Fixed setup: nothing to change on the in-car dials right now.' : 'Nothing to change right now.'}</div>`;
+
+    // tyres + last incident
+    const t = s.tyreLoad, tl = [];
+    if (t?.state) {
+      const [label, cls] = TYRE[t.state] || [t.state, 'muted'];
+      const extra = t.state === 'cold' && num(t.warmPct) ? ` · ${(t.warmPct * 100).toFixed(0)}%` : t.state.startsWith('hot') && num(t.coolLaps) ? ` · ~${t.coolLaps.toFixed(1)} laps to cool` : '';
+      tl.push(`<div class="item big"><span class="${cls}">${esc(label)}</span><span class="muted small">${esc(extra)}</span></div>`);
+    }
+    if (s.lastCrash) tl.push(`<div class="item small">${esc(s.lastCrash)}</div>`);
+    $('tyres').className = tl.length ? '' : 'empty';
+    $('tyres').innerHTML = tl.length ? tl.join('') : '<div class="empty">–</div>';
+
+    // fetch the garage suggestions again a moment after each lap
+    const k = `${s.sessionDbId || 0}:${p?.laps ?? 0}`;
+    if (k !== lapKey) {
+      lapKey = k; sessionId = s.sessionDbId || 0;
+      clearTimeout(timer); timer = setTimeout(loadGarage, 2500);
+    }
+  }
+
+  // live feed over a WebSocket; if the network won't carry one (some routers / proxies), poll instead
+  let fails = 0, polling = false;
+  function poll() {
+    polling = true;
+    fetch('/api/live').then(r => r.json()).then(render).catch(() => { }).finally(() => setTimeout(poll, 500));
+  }
+  function connect() {
+    if (polling) return;
+    let opened = false, last = 0;
+    const ws = new WebSocket(`ws://${location.host}/ws/live`);
+    ws.onopen = () => { opened = true; fails = 0; };
+    ws.onmessage = e => { const now = Date.now(); if (now - last < 250) return; last = now; try { render(JSON.parse(e.data)); } catch { } };
+    ws.onclose = () => { if (!opened && ++fails >= 2) poll(); else setTimeout(connect, 1500); };
+  }
+  connect();
+</script>
+</body>
+</html>

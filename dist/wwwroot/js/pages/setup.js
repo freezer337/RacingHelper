@@ -53,11 +53,11 @@ async function optimiser(el) {
 /** Suggested garage changes from /api/setup/auto (Setup, Live pace and Live pages). compact: top changes only. */
 export function suggestionsHtml(r, compact = false) {
   if (!r?.items?.length) return r?.handling?.valid
-    ? '<div class="small muted">No consistent handling problem: the time is in the driving now (see What to work on).</div>'
+    ? `<div class="small muted">${r.fixedSetup ? 'Fixed setup, and nothing on the in-car dials would help' : 'Nothing this car can change would help'}: the time is in the driving now (see What to work on).</div>`
     : '<div class="small muted">Needs a few clean laps at the limit (3+).</div>';
   if (compact) return `<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">${r.items.slice(0, 3).map(it => {
       const c = it.advice.changes[0];
-      return `<li><div class="small muted">${esc(it.advice.title)}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div><b>${esc(c.parameter)}</b> — ${esc(c.action)}</div>` : ''}</li>`;
+      return `<li><div class="small muted">${esc(it.advice.title)}${it.request.phase ? ' · ' + esc(it.request.phase) : ''}</div>${c ? `<div><b>${esc(c.parameter)}</b> — ${esc(c.action)}${c.target ? ` (${esc(c.target)})` : ''}${c.inCar ? ' <span class="tag blue">in the car</span>' : ''}</div>` : ''}</li>`;
     }).join('')}</ol>`;
   return r.items.map(it => `<h3 style="margin:6px 0 10px">${esc(it.advice.title)} · ${esc(it.request.phase)} · ${esc(it.request.speed)}</h3>${adviceHtml({ ...it.advice, changes: it.advice.changes.slice(0, 4), drivingTips: it.advice.drivingTips.slice(0, 1), notes: [] })}`).join('<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">');
 }
@@ -66,7 +66,7 @@ function adviceHtml(a) {
   return `
     <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">
       ${a.changes.slice(0, 8).map((c, i) => `<li ${i > 3 ? 'class="muted"' : ''}>
-        <div><b>${esc(c.parameter)}</b> — ${esc(c.action)} <span class="tag ${i < 3 ? 'green' : ''}">${i < 3 ? 'try first' : esc(c.area)}</span></div>
+        <div><b>${esc(c.parameter)}</b> — ${esc(c.action)}${c.target ? ` <b class="num">(${esc(c.target)})</b>` : ''} <span class="tag ${i < 3 ? 'green' : ''}">${i < 3 ? 'try first' : esc(c.area)}</span>${c.inCar ? ' <span class="tag blue">in the car</span>' : ''}</div>
         <div class="small muted">${esc(c.why)} · ${esc(c.amount)}</div>
         ${c.current.length ? `<div class="tiny" style="margin-top:3px">Current: <span class="num">${c.current.map(esc).join(' · ')}</span></div>` : ''}
       </li>`).join('')}

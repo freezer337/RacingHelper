@@ -13,8 +13,7 @@ export async function render(root) {
           <label class="field">Radio mode <span class="dim">(switch it while driving with the "Radio mode" button or key below)</span>${sel('radioMode', [['auto', 'Automatic by session — practice: lots of info, qualifying: half silent, race: normal'], ['practice', 'Always practice — lap times, gains and losses, setup and tyre calls'], ['quali', 'Always qualifying — only tyre warm-up, "push now" and where you lose time'], ['race', 'Always race — the normal race radio'], ['minimal', 'Minimal — flags, fuel, damage, PBs']], s.radioMode)}</label>
           ${chk('quietInCorners', s.quietInCorners, 'Only talk on straights (hold messages until there is room to finish them before the next corner)')}
           ${chk('cornerCallouts', s.cornerCallouts, 'Call out each corner where I lose time (immediately after the corner)')}
-          <label class="field">Who speaks${sel('voiceOutput', [['auto', 'CrewChief when it is connected, otherwise Windows voice'], ['crewchief', 'Only CrewChief (silent when CrewChief is not running)'], ['windows', 'Always Windows voice']], s.voiceOutput)}</label>
-          <div class="form-grid"><label class="field">Rate<input type="range" id="voiceRate" min="-5" max="6" value="${s.voiceRate}"></label><label class="field">Volume<input type="range" id="voiceVolume" min="0" max="100" value="${s.voiceVolume}"></label></div>
+          <p class="small muted" style="margin:0">Your engineer talks through CrewChief's radio (set it up in the CrewChief card). Volume is CrewChief's own.</p>
           <div><button id="test" class="small">Radio check</button></div>
         </div>
       </div>
@@ -34,13 +33,15 @@ export async function render(root) {
           <div id="cc-status">${ccStatus(cc)}</div>
           ${chk('crewChiefEnabled', s.crewChiefEnabled, 'Let CrewChief V4 speak for Racing Helper')}
           ${chk('crewChiefSkipDuplicates', s.crewChiefSkipDuplicates, "Don't repeat what CrewChief already says itself (flags, fuel, lap times, incidents)")}
+          ${chk('crewChiefJimOnly', s.crewChiefJimOnly, "Only Jim's own recorded voice: skip anything he never recorded (corner coaching, setup changes, crash analysis). Those still show on the dashboard and iPad.")}
+          <p class="small muted" style="margin:0">Jim's real voice is used for every call he recorded: cold tyres, hot / cooking tyres, good tyre temps, last lap, radio check. Anything else CrewChief can only read with a text-to-speech voice.</p>
           <label class="field">Connection port <span class="dim">(change only if something else uses 1883)</span><input type="number" id="crewChiefPort" value="${s.crewChiefPort}"></label>
           <div class="row"><button id="cc-setup" class="small">Set up CrewChief</button><button id="cc-test" class="small">Radio check through CrewChief</button></div>
           <ol class="steps small" style="margin:0">
             <li>Click <b>Set up CrewChief</b>: it points CrewChief at Racing Helper (writes <span class="num">Documents\\CrewChiefV4\\mqtt_telemetry.json</span>, the original is backed up).</li>
             <li>In CrewChief → <b>Properties</b>: tick <b>MQTT Telemetry enabled</b>, type any <b>MQTT drivername</b>, and leave text-to-speech on (not "Never").</li>
             <li>Save and restart CrewChief, then press <b>Start Application</b> in CrewChief. The status above turns green. Racing Helper's messages then come over CrewChief's radio in a TTS voice.</li>
-            <li>CrewChief only talks while you're in a session (in the car, on track). In the menus and the garage the radio check, and everything else, comes on the Windows voice instead, so nothing gets lost.</li>
+            <li>CrewChief only talks while you're in a session (in the car, on track). Anything said before that waits and comes over the radio once you're out (for up to 2 minutes).</li>
           </ol>
         </div>
       </div>
@@ -53,8 +54,8 @@ export async function render(root) {
         <div class="grid" style="gap:10px">
           <label class="field">Use it${sel('autoPit', [['race', 'In races'], ['always', 'In every session'], ['off', 'Off']], s.autoPit)}</label>
           ${chk('autoPitFuel', s.autoPitFuel, 'Fuel: exactly what I need to finish (plus the safety margin)')}
-          <label class="field">Tyres${sel('autoPitTyres', [['auto', 'Change them if enough laps are left'], ['always', 'Always change'], ['never', 'Never change'], ['manual', "Don't touch the tyre boxes"]], s.autoPitTyres)}</label>
-          <label class="field">"Enough laps left" means at least<input type="number" min="1" max="50" id="autoPitTyreMinLaps" value="${s.autoPitTyreMinLaps}"></label>
+          <label class="field">Tyres${sel('autoPitTyres', [['auto', 'Change them only when the race still has a few laps to go'], ['always', 'Always change'], ['never', 'Never change'], ['manual', "Don't touch the tyre boxes"]], s.autoPitTyres)}</label>
+          <label class="field" id="minlaps-field">New tyres only if at least this many laps are left after the stop <span class="dim">(fresh tyres aren't worth the time loss for a couple of laps)</span><input type="number" min="1" max="50" id="autoPitTyreMinLaps" value="${s.autoPitTyreMinLaps}"></label>
           ${chk('autoPitPressures', s.autoPitPressures, 'New tyres get the cold pressures my last run here says I need')}
           ${chk('autoPitFastRepair', s.autoPitFastRepair, 'Fast repair when there is damage')}
           ${chk('autoPitWindscreen', s.autoPitWindscreen, 'Windscreen tear-off')}
@@ -96,9 +97,7 @@ export async function render(root) {
   const radioCheck = async () => {
     await save(true);
     const r = await api('/api/engineer/test', { body: {} });
-    toast(r.via === 'crewchief' ? 'Sent to CrewChief: ' + r.text
-      : r.crewChiefConnected ? 'Windows voice: CrewChief is connected but only talks once you are in a session on track. Press it again from the car (or use your radio check button).'
-      : 'Windows voice: CrewChief is not connected.');
+    toast(r.text, !r.ok);
   };
   $('#test', root).onclick = radioCheck;
   $('#cc-test', root).onclick = radioCheck;
@@ -138,6 +137,8 @@ export async function render(root) {
     el.innerHTML = ccStatus(await api('/api/crewchief').catch(() => null));
   }
   const ccTimer = setInterval(() => { if (!document.body.contains(root.querySelector('#cc-status'))) clearInterval(ccTimer); else refreshCc(); }, 3000);
+  const minLaps = () => { $('#minlaps-field', root).style.display = $('#autoPitTyres', root).value === 'auto' ? '' : 'none'; };
+  $('#autoPitTyres', root).addEventListener('change', minLaps); minLaps();
   loadLan(root);
   $('#save', root).onclick = () => save();
   async function save(quiet) {
@@ -145,12 +146,11 @@ export async function render(root) {
     const next = {
       ...s,
       voiceEnabled: v('voiceEnabled').checked, radioMode: v('radioMode').value, cornerCallouts: v('cornerCallouts').checked,
-      voiceOutput: v('voiceOutput').value, tyreManager: v('tyreManager').checked, coachingMode: v('coachingMode').value, liveSetupAdvice: v('liveSetupAdvice').checked,
+      tyreManager: v('tyreManager').checked, coachingMode: v('coachingMode').value, liveSetupAdvice: v('liveSetupAdvice').checked,
       quietInCorners: v('quietInCorners').checked, inCarAdvice: v('inCarAdvice').checked,
       autoPit: v('autoPit').value, autoPitFuel: v('autoPitFuel').checked, autoPitTyres: v('autoPitTyres').value, autoPitTyreMinLaps: Math.max(1, +v('autoPitTyreMinLaps').value || 6),
       autoPitPressures: v('autoPitPressures').checked, autoPitFastRepair: v('autoPitFastRepair').checked, autoPitWindscreen: v('autoPitWindscreen').checked, hotspotWarnings: v('hotspotWarnings').checked, setupRunLaps: Math.min(10, Math.max(3, +v('setupRunLaps').value || 5)),
-      crewChiefEnabled: v('crewChiefEnabled').checked, crewChiefSkipDuplicates: v('crewChiefSkipDuplicates').checked, crewChiefPort: +v('crewChiefPort').value || 1883,
-      voiceRate: +v('voiceRate').value, voiceVolume: +v('voiceVolume').value,
+      crewChiefEnabled: v('crewChiefEnabled').checked, crewChiefSkipDuplicates: v('crewChiefSkipDuplicates').checked, crewChiefJimOnly: v('crewChiefJimOnly').checked, crewChiefPort: +v('crewChiefPort').value || 1883,
       referenceMode: v('referenceMode').value, deltaSectors: v('deltaSectors').value, fuelMarginLaps: +v('fuelMarginLaps').value, myUserId: +v('myUserId').value,
       speedUnit: v('speedUnit').value, pressureUnit: v('pressureUnit').value, tempUnit: v('tempUnit').value,
       autoImportIbt: v('autoImportIbt').checked, autoStartDiskTelemetry: v('autoStartDiskTelemetry').checked, autoInstallSetups: v('autoInstallSetups').checked,
@@ -170,8 +170,8 @@ function ccStatus(cc) {
   let line;
   if (!cc.enabled) line = dot('var(--panel3)') + 'Off';
   else if (cc.status === 'error') line = dot('var(--red)') + esc(cc.error);
-  else if (cc.connected && cc.live) line = dot('var(--accent)') + `Connected${cc.driverName ? ` as <b>${esc(cc.driverName)}</b>` : ''} · in a session${cc.usingCrewChief ? ' · CrewChief is the voice' : ''}`;
-  else if (cc.connected) line = dot('var(--accent)') + `Connected${cc.driverName ? ` as <b>${esc(cc.driverName)}</b>` : ''} · <span class="muted">CrewChief takes over once you're in a session on track (until then: Windows voice)</span>`;
+  else if (cc.connected && cc.live) line = dot('var(--accent)') + `Connected${cc.driverName ? ` as <b>${esc(cc.driverName)}</b>` : ''} · in a session`;
+  else if (cc.connected) line = dot('var(--accent)') + `Connected${cc.driverName ? ` as <b>${esc(cc.driverName)}</b>` : ''} · <span class="muted">CrewChief talks once you're in a session on track${cc.held ? ` (${cc.held} message${cc.held > 1 ? 's' : ''} waiting)` : ''}</span>`;
   else line = dot('#F5B942') + `Waiting for CrewChief on port ${cc.port}`;
   const cfg = !cc.configFound ? "CrewChief's MQTT file wasn't found yet (start CrewChief once, then click Set up)."
     : cc.configured ? 'CrewChief is set up to use Racing Helper.'
@@ -243,7 +243,7 @@ async function loadLan(root) {
     : r.firewallRule ? `<div class="good" style="margin-top:8px">Windows Firewall: allowed for devices on your home network.</div>`
     : `<div class="warn" style="margin-top:8px">Windows Firewall probably blocks other devices (most home networks are set to "Public" in Windows).</div>`;
   el.innerHTML = `
-    ${best ? `<div>On your phone or tablet, type exactly: <b class="num" style="font-size:15px">${esc(best.url)}#/pace</b> <span class="muted">(${esc(best.adapter)})</span></div>` : '<div class="bad">No network address found. Is the PC connected to your router?</div>'}
+    ${best ? `<div>On your iPad or phone, type exactly: <b class="num" style="font-size:15px">${esc(best.url)}</b> <span class="muted">(${esc(best.adapter)})</span>. It opens the pit-wall view: pace, what to change on the car, and the corners where you're slow with how to fix them. Tip: Share → Add to Home Screen makes it an app icon.</div>` : '<div class="bad">No network address found. Is the PC connected to your router?</div>'}
     ${others.length ? `<div class="muted" style="margin-top:4px">If that one doesn't work, this PC also has: ${others.map(a => `<span class="num">${esc(a.url)}</span> (${esc(a.adapter)})`).join(', ')}</div>` : ''}
     ${fw}
     ${r.windows && !(r.firewallRule && !r.firewallBlocks) ? `<div style="margin-top:6px"><button class="small primary" id="lan-fix">Allow through Windows Firewall</button> <span class="muted">Windows asks for your OK. Only devices on your own network get in.</span></div>` : ''}

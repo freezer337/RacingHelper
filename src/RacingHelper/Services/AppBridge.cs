@@ -9,10 +9,6 @@ public sealed class AppBridge : IAppBridge
     readonly App _app;
     public AppBridge(App app) { _app = app; }
 
-    public IReadOnlyList<string> Voices() => _app.Voice.Voices();
-
-    public void Speak(string text) => _app.Voice.Say(text, 2);
-
     public bool OverlayEditMode
     {
         get => _app.Dispatcher.Invoke(() => _app.Overlays.EditMode);

@@ -154,6 +154,17 @@ public sealed class PaceLive
     public int CleanLaps { get; set; }
     public int Laps { get; set; }
     public string Focus { get; set; } = "";                    // where most of the theoretical gain is, e.g. "T1 0.24, T3 0.13"
+    public List<FocusCorner> Corners { get; set; } = new();    // where you keep losing time against your reference, and how to fix it
+}
+
+/// <summary>A corner where your last clean laps lose time to the reference lap, with what to do differently.</summary>
+public sealed class FocusCorner
+{
+    public string Name { get; set; } = "";
+    public double Loss { get; set; }          // average seconds lost per lap there (last clean laps)
+    public int Laps { get; set; }             // how many of those laps lost time there
+    public string Advice { get; set; } = "";  // "Brake 12 m later", "Carry 6 km/h more through the apex"…
+    public string Reference { get; set; } = "";
 }
 
 /// <summary>Immutable-by-convention snapshot of everything live, published ~20× per second.</summary>

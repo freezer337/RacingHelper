@@ -61,7 +61,20 @@ function updateStatus(s) {
   $('#session-line').textContent = line;
 }
 
+// Opened from another device (iPad, phone): the focused pit-wall view, unless the full dashboard was asked for.
+function remoteView() {
+  const local = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(location.hostname);
+  if (local) return false;
+  try {
+    if (new URLSearchParams(location.search).has('full')) { sessionStorage.setItem('rh-full', '1'); return false; }
+    if (sessionStorage.getItem('rh-full')) return false;
+  } catch { }
+  location.replace('/ipad.html');
+  return true;
+}
+
 async function init() {
+  if (remoteView()) return;
   buildNav();
   await loadSettings().catch(() => null);
   startLive();

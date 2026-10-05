@@ -22,6 +22,8 @@ public sealed class SetupChange
     public string Amount { get; set; } = "";
     public string Why { get; set; } = "";
     public List<string> Current { get; set; } = new(); // "Chassis.Front.ArbSize = Medium"
+    public string Target { get; set; } = "";            // what to set it to, when that's clear: "Soft → Medium", "5 → 4 clicks"
+    public bool InCar { get; set; }                     // an in-car dial (changeable while driving, also in fixed setups)
 }
 
 public sealed class SetupAdvice
@@ -30,6 +32,8 @@ public sealed class SetupAdvice
     public List<SetupChange> Changes { get; set; } = new();
     public List<string> DrivingTips { get; set; } = new();
     public List<string> Notes { get; set; } = new();
+    public List<string> NotAdjustable { get; set; } = new();   // suggestions skipped because this car doesn't have them
+    public bool FixedSetup { get; set; }
 }
 
 public static class SetupOptimiser
@@ -59,8 +63,9 @@ public static class SetupOptimiser
         ["Rear anti-roll bar"] = @"(Rear|^Chassis\.Rear).*?(Arb|AntiRoll|Sway)|RearArb|ArbRear",
         ["Front springs"] = @"(LeftFront|RightFront|Front).*?(SpringRate|TorsionBarOD|HeaveSpring)",
         ["Rear springs"] = @"(LeftRear|RightRear|Rear).*?(SpringRate|TorsionBarOD|ThirdSpring|HeaveSpring)",
-        ["Front ride height"] = @"(LeftFront|RightFront|Front).*?RideHeight",
-        ["Rear ride height"] = @"(LeftRear|RightRear|Rear).*?RideHeight",
+        // what's shown as RideHeight is computed; it's set with pushrods / spring perches / packers on most cars
+        ["Front ride height"] = @"(LeftFront|RightFront|Front).*?(RideHeight|PushrodOffset|PushrodLength|SpringPerch|PerchOffset)",
+        ["Rear ride height"] = @"(LeftRear|RightRear|Rear).*?(RideHeight|PushrodOffset|PushrodLength|SpringPerch|PerchOffset)",
         ["Front camber"] = @"(LeftFront|RightFront).*?Camber",
         ["Rear camber"] = @"(LeftRear|RightRear).*?Camber",
         ["Front toe"] = @"(LeftFront|RightFront|Front).*?Toe",
@@ -70,7 +75,7 @@ public static class SetupOptimiser
         ["Rear bump damping"] = @"(LeftRear|RightRear|Rear).*?(Comp|Bump)",
         ["Rear rebound damping"] = @"(LeftRear|RightRear|Rear).*?(Rbd|Rebound)",
         ["Rear wing"] = @"RearWing|WingAngle|RearUpperFlap|RearBeamWing|WingSetting",
-        ["Front wing"] = @"FrontFlap|FrontWing|FrontFlapAngle|DiveP",
+        ["Front wing"] = @"FrontFlap|FrontWing|FrontMainplane|FrontFlapAngle|DiveP",
         // must be inside a differential section (TorsionBarPreload etc. are not diff settings)
         ["Differential (coast)"] = @"^(?=.*Diff)(?=.*(Coast|Ramp|Preload|Friction|Clutch)).*",
         ["Differential (power)"] = @"^(?=.*Diff)(?=.*(Drive|Power|Ramp|Preload|Friction|Clutch)).*",
@@ -197,13 +202,20 @@ public static class SetupOptimiser
         ["high-speed-grip"] = new[] { "Smooth, small steering inputs at high speed keep the aero platform stable." },
     };
 
-    public static SetupAdvice Advise(SetupRequest req, YNode? carSetup)
+    /// <summary>
+    /// What to change for a symptom, for THIS car: iRacing's live setup (CarSetup in the session info) lists exactly the
+    /// garage and in-car settings the car has, so anything it doesn't have is left out instead of guessed. In a fixed
+    /// setup only the in-car dials can change. Where the current value makes it clear, the target is given too.
+    /// </summary>
+    public static SetupAdvice Advise(SetupRequest req, YNode? carSetup, bool fixedSetup = false)
     {
         var flat = new List<KeyValuePair<string, string>>();
         carSetup?.Flatten("", flat);
+        bool known = flat.Count > 0;
         var advice = new SetupAdvice
         {
             Title = Symptoms.FirstOrDefault(s => s.id == req.Symptom).label ?? req.Symptom,
+            FixedSetup = fixedSetup,
         };
 
         var matches = Rules.Where(r => r.Symptom == req.Symptom
@@ -216,10 +228,7 @@ public static class SetupOptimiser
                                // preference nudges: "stable" favours stabilising aids, "pointy" favours rotation changes
                                if (req.Preference == "stable" && (r.Param.Contains("toe") || r.Param.Contains("Traction") || r.Param.Contains("coast"))) w += 2;
                                if (req.Preference == "pointy" && (r.Param.Contains("anti-roll") || r.Param.Contains("bias"))) w += 2;
-                               // parameters that don't exist in this car's setup are deprioritised
-                               bool exists = flat.Count == 0 || CurrentValues(r.Param, flat).Count > 0;
-                               if (!exists) w -= 6;
-                               return (rule: r, weight: w, exists);
+                               return (rule: r, weight: w);
                            })
                            .OrderByDescending(x => x.weight)
                            .ToList();
@@ -227,28 +236,92 @@ public static class SetupOptimiser
         string amount = req.Severity switch { 1 => "small step (1 click)", 3 => "larger step (2–3 clicks), or combine the top two changes", _ => "1–2 clicks" };
         int pr = 1;
         var seen = new HashSet<string>();
-        foreach (var (rule, weight, exists) in matches)
+        foreach (var (rule, _) in matches)
         {
             if (!seen.Add(rule.Param)) continue;
-            var change = new SetupChange
+            var keys = CurrentKeys(rule.Param, flat);
+            if (known && keys.Count == 0) { advice.NotAdjustable.Add(rule.Param); continue; }     // this car doesn't have it
+            bool inCar = keys.Any(k => IsInCarKey(k.Key));
+            if (fixedSetup && !inCar) continue;                                                     // garage is locked
+            var current = keys.Select(kv => $"{Short(kv.Key)} = {kv.Value}").Distinct().Take(4).ToList();
+            var (target, atLimit) = TargetFor(rule.Param, rule.Action, keys);
+            if (atLimit) { advice.Notes.Add($"{rule.Param} is already at its limit ({keys[0].Value}), so it's not suggested."); continue; }
+            advice.Changes.Add(new SetupChange
             {
                 Priority = pr++,
                 Area = rule.Area,
                 Parameter = rule.Param,
                 Action = rule.Action,
                 Amount = amount,
-                Why = rule.Why + (exists ? "" : " (not found in this car's setup — may not be adjustable)"),
-                Current = CurrentValues(rule.Param, flat).Take(4).ToList(),
-            };
-            advice.Changes.Add(change);
+                Why = rule.Why,
+                Current = current,
+                Target = target,
+                InCar = inCar,
+            });
         }
         if (Tips.TryGetValue(req.Symptom, out var tips)) advice.DrivingTips.AddRange(tips);
+        if (fixedSetup) advice.Notes.Add("Fixed setup: the garage is locked, so only the car's in-car dials are suggested.");
+        if (advice.NotAdjustable.Count > 0) advice.Notes.Add($"This car has no adjustable {string.Join(", ", advice.NotAdjustable.Select(x => x.ToLowerInvariant()))}, so those aren't suggested.");
         advice.Notes.Add("Change one thing at a time and do 3+ consistent laps before judging it. The setup journal tracks lap times per setup automatically.");
-        if (flat.Count == 0) advice.Notes.Add("No live setup available — join a session (or pick a recorded one) to see your current values next to each suggestion.");
+        if (!known) advice.Notes.Add("No live setup available — join a session (or pick a recorded one) to see only what this car can adjust, with your current values.");
         return advice;
     }
 
+    /// <summary>In-car dials live in sections like InCarDials / BrakesInCarMisc / InCarAdjustments.</summary>
+    static bool IsInCarKey(string key) => key.Contains("InCar", StringComparison.OrdinalIgnoreCase);
+
+    static readonly string[] SoftStiff = { "Soft", "Medium", "Stiff" };
+
+    /// <summary>Target value where the setup value says it unambiguously; atLimit when the change can't go further.</summary>
+    static (string target, bool atLimit) TargetFor(string param, string action, List<KeyValuePair<string, string>> keys)
+    {
+        if (keys.Count == 0) return ("", false);
+        string a = action.ToLowerInvariant();
+        int dir = a.StartsWith("soften") || a.StartsWith("lower") || a.StartsWith("reduce") || a.Contains("rearward") || a.StartsWith("less") ? -1
+                : a.StartsWith("stiffen") || a.StartsWith("raise") || a.StartsWith("add") || a.Contains("forward") || a.StartsWith("more") || a.StartsWith("increase") ? +1 : 0;
+        if (dir == 0) return ("", false);
+        string v = keys[0].Value.Trim();
+
+        // Soft / Medium / Stiff bars
+        int i = Array.FindIndex(SoftStiff, x => x.Equals(v, StringComparison.OrdinalIgnoreCase));
+        if (i >= 0 && param.Contains("anti-roll"))
+        {
+            int j = i + dir;
+            return j < 0 || j >= SoftStiff.Length ? ("", true) : ($"{SoftStiff[i]} → {SoftStiff[j]}", false);
+        }
+        var m = Regex.Match(v, @"^([+-]?\d+(?:\.\d+)?)\s*(.*)$");
+        if (!m.Success) return ("", false);
+        double x = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        string unit = m.Groups[2].Value.Trim();
+        string F(double d) => d.ToString(unit == "%" ? "0.0" : "0.#", System.Globalization.CultureInfo.InvariantCulture);
+        // anti-roll bar blade / position number: higher = stiffer (blade 1 is the flat, softest one)
+        if (param.Contains("anti-roll") && unit.Length == 0 && keys[0].Key.Contains("Blade", StringComparison.OrdinalIgnoreCase))
+        {
+            double t = x + dir;
+            return t < 1 ? ("", true) : ($"blade {F(x)} → {F(t)}", false);
+        }
+        // damper clicks: more clicks = stiffer
+        if (param.Contains("damping") && unit.StartsWith("click"))
+        {
+            double t = x + dir;
+            return t < 0 ? ("", true) : ($"{F(x)} → {F(t)} clicks", false);
+        }
+        // brake bias is the front share: forward = higher
+        if (param == "Brake bias" && unit == "%") return ($"{F(x)}% → {F(x + dir * 0.5)}%", false);
+        if (param.Contains("tyre pressure") && unit == "kPa" && a.StartsWith("lower")) return ($"{F(x)} → {F(x - 3)} kPa", false);
+        return ("", false);
+    }
+
     static bool Match(string list, string value) => list == "*" || value == "all" || value == "*" || list.Split(',').Contains(value);
+
+    static List<KeyValuePair<string, string>> CurrentKeys(string param, List<KeyValuePair<string, string>> flat)
+    {
+        if (!ParamKeys.TryGetValue(param, out var pattern)) return new();
+        var rx = new Regex(pattern, RegexOptions.IgnoreCase);
+        return flat.Where(kv => rx.IsMatch(kv.Key) && !Volatile(kv.Key) && !kv.Key.Contains("LastHot")
+                                && !(param.Contains("damping") && Regex.IsMatch(kv.Key, "BumpStop|BumpRubber|Packer", RegexOptions.IgnoreCase)))
+                   .ToList();
+    }
 
     static List<string> CurrentValues(string param, List<KeyValuePair<string, string>> flat)
     {

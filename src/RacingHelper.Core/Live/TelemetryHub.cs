@@ -97,6 +97,7 @@ public sealed class TelemetryHub : IDisposable
     LapComparison? _lastCmp;
     readonly List<double> _recentLaps = new();
     readonly List<double> _cleanLaps = new();   // every clean lap this session (pace trend)
+    readonly List<LapComparison> _recentCmps = new();   // last clean laps vs the reference, corner by corner
     PaceLive? _pace;
 
     // input history ring buffers (~30 Hz, 6 s)
@@ -246,6 +247,24 @@ public sealed class TelemetryHub : IDisposable
                 if (sxx > 0) p.Trend = pts.Sum(q => (q.x - mx) * (q.y - my)) / sxx;
             }
         }
+        // corners where the last clean laps keep losing time to the reference, with the latest advice for each
+        p.Corners = _recentCmps.SelectMany(c => c.Corners.Select(x => (x, reference: c)))
+            .GroupBy(t => t.x.Name)
+            .Select(g =>
+            {
+                var losing = g.Where(t => t.x.TimeDelta > 0.02f).ToList();
+                var latest = losing.LastOrDefault().x;
+                return new FocusCorner
+                {
+                    Name = g.Key,
+                    Loss = g.Average(t => (double)Math.Max(0, t.x.TimeDelta)),
+                    Laps = losing.Count,
+                    Advice = latest == null ? "" : latest.Advice.FirstOrDefault() ?? latest.Verdict,
+                    Reference = _ref?.Label ?? "",
+                };
+            })
+            .Where(fc => fc.Loss >= 0.03 && fc.Advice.Length > 0 && fc.Laps * 2 >= Math.Min(_recentCmps.Count, 4))
+            .OrderByDescending(fc => fc.Loss).Take(4).ToList();
         try
         {
             var (best, gain, top) = Insights.PotentialInfo();
@@ -270,11 +289,15 @@ public sealed class TelemetryHub : IDisposable
     public string RadioCheck()
     {
         var s = Settings.Current;
-        string via = CrewChief.UseCrewChief ? "through CrewChief" : "on the Windows voice";
-        string mode = $" {Cap(RaceEngineer.ModeName(s.RadioMode))}{(s.RadioMode == "auto" ? ", " + Engineer.Profile switch { "quali" => "qualifying", "race" => "race", _ => "practice" } + " right now" : "")}.";
-        if (CrewChief.Connected && !CrewChief.Live && s.VoiceOutput != "windows")
-            return $"Radio check, loud and clear {via}.{mode} CrewChief is connected, but it only talks once you're in a session on track, so you'll hear it there.";
-        return $"Radio check, loud and clear {via}.{mode}";
+        string mode = $"{Cap(RaceEngineer.ModeName(s.RadioMode))}{(s.RadioMode == "auto" ? ", " + Engineer.Profile switch { "quali" => "qualifying", "race" => "race", _ => "practice" } + " right now" : "")}.";
+        string why = !s.CrewChiefEnabled ? "CrewChief is switched off in Settings."
+            : CrewChief.Status == "error" ? CrewChief.Error
+            : !CrewChief.Connected ? "CrewChief isn't connected: start CrewChief and press Start Application (Settings → CrewChief shows the steps)."
+            : !CrewChief.Live ? "CrewChief is connected but only talks once you're in a session on track. Try again from the car."
+            : "";
+        if (why.Length > 0) return why;
+        CrewChief.RadioCheck();
+        return $"Radio check sent: Jim answers on CrewChief's radio. {mode}";
     }
 
     static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
@@ -338,7 +361,12 @@ public sealed class TelemetryHub : IDisposable
                 return last.Text;
             }
             case "radio":
-                return RadioCheck();
+            {
+                // Jim answers himself; the text only goes to the feed
+                string r = RadioCheck();
+                Engineer.Say(r, "info", 0, speak: false);
+                return "";
+            }
             case "radio-mode":
             {
                 var modes = new[] { "auto", "practice", "quali", "race" };
@@ -394,7 +422,7 @@ public sealed class TelemetryHub : IDisposable
         if (req.Symptom == "understeer" && req.Phase == "entry" && dc.ContainsKey("dcBrakeBias")) return "move brake bias back 0.5";
         if (si.IsFixedSetup) return "";
         req.Category = si.CarCategory;
-        var ch = SetupOptimiser.Advise(req, si.CarSetup).Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
+        var ch = SetupOptimiser.Advise(req, si.CarSetup, si.IsFixedSetup).Changes.FirstOrDefault(c => !c.Why.Contains("not found"));
         return ch == null ? "" : $"{ch.Parameter}, {ch.Action.ToLowerInvariant()} in the garage";
     }
 
@@ -691,6 +719,7 @@ public sealed class TelemetryHub : IDisposable
         _lastCmp = null;
         _recentLaps.Clear();
         _cleanLaps.Clear();
+        _recentCmps.Clear();
         _pace = null;
     }
 
@@ -912,6 +941,7 @@ public sealed class TelemetryHub : IDisposable
         {
             _recentLaps.Add(lap.LapTime); if (_recentLaps.Count > 5) _recentLaps.RemoveAt(0);
             _cleanLaps.Add(lap.LapTime);
+            if (cmp != null) { _recentCmps.Add(cmp); if (_recentCmps.Count > 5) _recentCmps.RemoveAt(0); }
         }
         _pace = BuildPace(lap);
 

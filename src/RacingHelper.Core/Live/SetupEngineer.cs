@@ -107,14 +107,15 @@ public sealed class SetupEngineer
         foreach (var todo in notes.Todo.ToList())
         {
             var req = new SetupRequest { Symptom = todo.Symptom, Phase = todo.Phase, Speed = todo.Speed, Category = si.CarCategory };
-            var adv = SetupOptimiser.Advise(req, si.CarSetup);
+            var adv = SetupOptimiser.Advise(req, si.CarSetup, si.IsFixedSetup);
             var change = adv.Changes.FirstOrDefault(c => !c.Why.Contains("not found") && !_tried.Contains(c.Parameter) && (!_fixed || InCar(c.Parameter)));
             if (change == null) continue;
             _req = req; _change = change; _fromTodo = todo; _iteration++;
             _tried.Add(change.Parameter);
             string words = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, todo.Reason) is { } said
                 ? said.Words : $"{change.Parameter}, {change.Action}";
-            string now = change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
+            string now = change.Target.Length > 0 ? $" From {change.Target.Replace(" → ", " to ")}."
+                   : change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
             State = Phase.WaitChange;
             Instruction = InCar(change.Parameter) ? Cap(words) : $"{change.Parameter}: {change.Action}";
             plan = InCar(change.Parameter)
@@ -250,7 +251,7 @@ public sealed class SetupEngineer
         {
             foreach (var req in SetupOptimiser.FromHandling(rep, si.CarCategory))
             {
-                var adv = SetupOptimiser.Advise(req, si.CarSetup);
+                var adv = SetupOptimiser.Advise(req, si.CarSetup, si.IsFixedSetup);
                 change = adv.Changes.FirstOrDefault(c => !c.Why.Contains("not found") && !_tried.Contains(c.Parameter) && (!_fixed || InCar(c.Parameter)));
                 if (change != null) { pick = req; break; }
             }
@@ -267,12 +268,13 @@ public sealed class SetupEngineer
         _tried.Add(change.Parameter);
         var cell = rep!.Cells.FirstOrDefault(c => c.Tendency == pick.Symptom && c.Phase == pick.Phase);
         string where = cell != null ? $"{pick.Symptom} {(pick.Phase == "mid" ? "mid-corner" : "on " + pick.Phase)} in {cell.SpeedBand} corners" : pick.Symptom;
-        string now = change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
+        string now = change.Target.Length > 0 ? $" From {change.Target.Replace(" → ", " to ")}."
+                   : change.Current.Count > 0 ? $" It's on {change.Current[0].Split(" = ").Last()} now." : "";
         State = Phase.WaitChange;
         // in-car changes are said as a plain instruction: "increase TC by 1"
         string inCarWords = InCarAdjustments.ForParam(change.Parameter) is { } a && InCarAdjustments.FromAction(a, change.Action, where) is { } said
             ? said.Words : $"{change.Parameter}, {change.Action}";
-        Instruction = InCar(change.Parameter) ? Cap(inCarWords) : $"{change.Parameter}: {change.Action}";
+        Instruction = InCar(change.Parameter) ? Cap(inCarWords) : $"{change.Parameter}: {change.Action}{(change.Target.Length > 0 ? $" ({change.Target})" : "")}";
         Say(InCar(change.Parameter)
             ? $"{intro}You've got {where}. In the car: {inCarWords}.{now} I'll see it when you do."
             : $"{intro}You've got {where}. Box, and in the garage: {change.Parameter}, {change.Action}.{now} Then {LapsPerRun} laps.", 2);
